@@ -1,1 +1,20 @@
-{"name":"neonmind-shop","version":"0.1.0","private":true,"type":"module","scripts":{"start":"node server/index.mjs","test":"node --test tests/*.test.mjs","check":"node --check dist/shop.js && node --check server/index.mjs"},"engines":{"node":">=24"}}
+{
+  "name": "neonmind-shop",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node server/index.mjs",
+    "test": "node --test tests/*.test.mjs",
+    "check": "node --check dist/shop.js && node --check server/index.mjs",
+    "deploy": "wrangler deploy",
+    "preview": "wrangler dev",
+    "deploy:check": "wrangler deploy --dry-run"
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "devDependencies": {
+    "wrangler": "4.147.0"
+  }
+}
