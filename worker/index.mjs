@@ -1,3 +1,4 @@
+import {adminApi, catalog} from './admin.mjs';
 import {products} from '../dist/catalog.js';
 import {randomToken,digest,hashPassword,verifyPassword,normalizeEmail,validEmail,validPassword} from './auth.mjs';
 const sessionName='nm_session';
@@ -9,14 +10,17 @@ async function sessionHeaders(db,user){const token=randomToken();await db.prepar
 async function limited(request,db,email){const key=await digest((request.headers.get('CF-Connecting-IP')||'local')+'|'+email),now=Date.now();await db.prepare('INSERT INTO auth_attempts(key_hash,attempts,window_start) VALUES(?,1,?) ON CONFLICT(key_hash) DO UPDATE SET attempts=CASE WHEN window_start<? THEN 1 ELSE attempts+1 END,window_start=CASE WHEN window_start<? THEN excluded.window_start ELSE window_start END').bind(key,now,now-900000,now-900000).run();const row=await db.prepare('SELECT attempts FROM auth_attempts WHERE key_hash=?').bind(key).first();return row.attempts>10}
 async function items(db,id){return (await db.prepare('SELECT product_id,price FROM customer_order_items WHERE order_id=?').bind(id).all()).results}
 async function orderResult(db,row){return {...row,items:await items(db,row.id)}}
-export default {async fetch(request,env){const url=new URL(request.url);if(!url.pathname.startsWith('/api/'))return env.ASSETS.fetch(request);try{
+export default {async fetch(request,env){const url=new URL(request.url);if(url.pathname==='/admin')return Response.redirect(url.origin+'/#admin',302);if(!url.pathname.startsWith('/api/'))return env.ASSETS.fetch(request);try{
  const db=env.DB;
  if(url.pathname==='/api/health')return json({mode:'preview',paymentsEnabled:false,accountsEnabled:!!db&&!!env.AUTH_PEPPER&&env.AUTH_PEPPER.length>=32,guestOrdersEnabled:!!db});
- if(url.pathname==='/api/products')return json(products);
+ if(url.pathname==='/api/products')return json(await catalog(db));
  if(!db)return json({error:'DATABASE_NOT_CONFIGURED'},503);
  if(request.method==='POST'&&request.headers.get('Origin')!==url.origin)return json({error:'INVALID_ORIGIN'},403);
- if(request.method==='POST'&&!request.headers.get('Content-Type')?.startsWith('application/json'))return json({error:'JSON_REQUIRED'},415);
+ if(request.method==='POST'&&!url.pathname.startsWith('/api/admin/upload/')&&!url.pathname.startsWith('/api/admin/upload-preview/')&&!request.headers.get('Content-Type')?.startsWith('application/json'))return json({error:'JSON_REQUIRED'},415);
+ if(url.pathname.startsWith('/api/preview/')&&request.method==='GET'){const id=url.pathname.split('/').pop();const row=await db.prepare('SELECT object_key FROM product_previews WHERE product_id=?').bind(id).first();const object=row&&await env.PRODUCT_FILES?.get(row.object_key);if(!object)return new Response('Nicht gefunden',{status:404});return new Response(object.body,{headers:{'Content-Type':object.httpMetadata.contentType,'Cache-Control':'no-cache','X-Content-Type-Options':'nosniff'}});}
  const user=await session(request,db);
+ if(url.pathname.startsWith('/api/admin/'))return adminApi(request,env,user);
+ if(url.pathname==='/api/download'&&request.method==='POST'){const body=await input(request);const order=await db.prepare('SELECT * FROM customer_orders WHERE id=?').bind(body.orderId||'').first();if(!order||order.status!=='paid'||(order.customer_id?order.customer_id!==user?.id:await digest(body.key||'')!==order.guest_key_hash))return json({error:'Kein bezahlter Downloadzugang.'},403);const item=await db.prepare('SELECT product_id FROM customer_order_items WHERE order_id=? AND product_id=?').bind(order.id,body.productId||'').first();const file=item&&await db.prepare('SELECT * FROM product_files WHERE product_id=?').bind(item.product_id).first();const object=file&&await env.PRODUCT_FILES?.get(file.object_key);if(!object)return json({error:'Datei nicht verfügbar.'},404);return new Response(object.body,{headers:{'Content-Type':'application/zip','Content-Disposition':'attachment; filename="'+file.filename+'"','Cache-Control':'private, no-store','X-Content-Type-Options':'nosniff'}});}
  if(url.pathname==='/api/me'&&request.method==='GET')return json({user});
  if(['/api/register','/api/login'].includes(url.pathname)&&request.method==='POST'){
   if(!env.AUTH_PEPPER||env.AUTH_PEPPER.length<32)return json({error:'AUTH_NOT_CONFIGURED'},503);
@@ -37,8 +41,8 @@ export default {async fetch(request,env){const url=new URL(request.url);if(!url.
  if(url.pathname==='/api/orders'&&request.method==='GET'){if(!user)return json({error:'UNAUTHORIZED'},401);const rows=(await db.prepare('SELECT id,amount,status,created_at FROM customer_orders WHERE customer_id=? ORDER BY created_at DESC LIMIT 100').bind(user.id).all()).results;return json({orders:await Promise.all(rows.map(row=>orderResult(db,row)))})}
  if(url.pathname==='/api/orders/demo'&&request.method==='POST'){
   const body=await input(request);if(!['guest','account'].includes(body.purchaseMode)||body.purchaseMode==='account'&&!user)return json({error:'Bitte anmelden oder Gastkauf wÃ¤hlen.'},401);
-  if(!Array.isArray(body.items)||!body.items.length||body.items.length>products.length||new Set(body.items).size!==body.items.length)return json({error:'INVALID_CART'},400);
-  const selected=body.items.map(id=>products.find(p=>p.id===id));if(selected.some(p=>!p))return json({error:'INVALID_PRODUCT'},400);
+  if(!Array.isArray(body.items)||!body.items.length||body.items.length>100||new Set(body.items).size!==body.items.length)return json({error:'INVALID_CART'},400);
+  const current=await catalog(db);const selected=body.items.map(id=>current.find(p=>p.id===id));if(selected.some(p=>!p))return json({error:'INVALID_PRODUCT'},400);
   if(body.result!=='success')return json({error:body.result==='pending'?'Zahlung ausstehend. Kein neuer Download freigegeben.':'Testzahlung fehlgeschlagen. Kein neuer Download freigegeben.'},409);
   const id=crypto.randomUUID(),key=randomToken(),amount=selected.reduce((n,p)=>n+p.price,0),created=Date.now();
   await db.batch([db.prepare('INSERT INTO customer_orders VALUES(?,?,?,?,?,?)').bind(id,body.purchaseMode==='account'?user.id:null,await digest(key),amount,'demo',created),...selected.map(p=>db.prepare('INSERT INTO customer_order_items VALUES(?,?,?)').bind(id,p.id,p.price))]);

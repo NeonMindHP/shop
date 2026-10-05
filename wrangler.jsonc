@@ -5,12 +5,29 @@
   "compatibility_date": "2026-10-01",
   "workers_dev": true,
   "preview_urls": true,
-  "observability": { "enabled": true },
-  "d1_databases": [{
-    "binding": "DB",
-    "database_name": "neonmind-shop",
-    "database_id": "cf3bab48-81d5-4f28-9dad-e81f605439d4",
-    "migrations_dir": "migrations"
-  }],
-  "assets": { "directory": "./dist", "binding": "ASSETS", "run_worker_first": ["/api/*"] }
+  "observability": {
+    "enabled": true
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "neonmind-shop",
+      "database_id": "cf3bab48-81d5-4f28-9dad-e81f605439d4",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "assets": {
+    "directory": "./dist",
+    "binding": "ASSETS",
+    "run_worker_first": [
+      "/api/*",
+      "/admin"
+    ]
+  },
+  "r2_buckets": [
+    {
+      "binding": "PRODUCT_FILES",
+      "bucket_name": "neonmind-shop-private"
+    }
+  ]
 }
