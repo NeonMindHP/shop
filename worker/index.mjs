@@ -1,4 +1,4 @@
-import {adminApi, catalog} from './admin.mjs';
+import {adminApi, catalog, storefront} from './admin.mjs';
 import {products} from '../dist/catalog.js';
 import {randomToken,digest,hashPassword,verifyPassword,normalizeEmail,validEmail,validPassword} from './auth.mjs';
 const sessionName='nm_session';
@@ -13,6 +13,7 @@ async function orderResult(db,row){return {...row,items:await items(db,row.id)}}
 export default {async fetch(request,env){const url=new URL(request.url);if(url.pathname==='/admin')return Response.redirect(url.origin+'/#admin',302);if(!url.pathname.startsWith('/api/'))return env.ASSETS.fetch(request);try{
  const db=env.DB;
  if(url.pathname==='/api/health')return json({mode:'preview',paymentsEnabled:false,accountsEnabled:!!db&&!!env.AUTH_PEPPER&&env.AUTH_PEPPER.length>=32,guestOrdersEnabled:!!db});
+ if(url.pathname==='/api/storefront'&&request.method==='GET')return json(await storefront(db));
  if(url.pathname==='/api/products')return json(await catalog(db));
  if(!db)return json({error:'DATABASE_NOT_CONFIGURED'},503);
  if(request.method==='POST'&&request.headers.get('Origin')!==url.origin)return json({error:'INVALID_ORIGIN'},403);
