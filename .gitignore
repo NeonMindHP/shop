@@ -8,3 +8,6 @@ private/
 .env
 .sites-runtime/
 *.tar.gz
+outputs/
+.venv/
+__pycache__/
