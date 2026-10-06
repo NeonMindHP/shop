@@ -3,7 +3,7 @@ import { products as initialProducts, money } from './catalog.js';
 let products=[...initialProducts];let storefrontSettings={categories:['Wallpaper','Streaming','Sonstiges'],productSort:'newest'};
 const $=s=>document.querySelector(s),view=$('#view'),dialog=$('#cartDialog');
 const read=(key,fallback)=>{try{return JSON.parse(localStorage.getItem(key))??fallback}catch{return fallback}};
-let cart=read('nm-cart',[]); if(!Array.isArray(cart))cart=[];cart=cart.filter(id=>products.some(p=>p.id===id));cart=[...new Set(cart)];
+let cart=read('nm-cart',[]); if(!Array.isArray(cart))cart=[];cart=cart.filter(id=>typeof id==='string'&&/^[a-z0-9-]{1,48}$/.test(id));cart=[...new Set(cart)];
 let orders=read('nm-demo-orders',[]);if(!Array.isArray(orders))orders=[];orders=orders.filter(o=>o&&Array.isArray(o.items)&&typeof o.id==='string'&&Number.isFinite(o.date));
 const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const save=()=>{try{localStorage.setItem('nm-cart',JSON.stringify(cart));localStorage.setItem('nm-demo-orders',JSON.stringify(orders))}catch{}$('#cartCount').textContent=cart.length};
