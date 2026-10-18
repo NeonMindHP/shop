@@ -4,6 +4,33 @@ import {randomToken,digest,hashPassword,verifyPassword,normalizeEmail,validEmail
 const sessionName='nm_session';
 const json=(data,status=200,headers={})=>new Response(JSON.stringify(data),{status,headers:{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff',...headers}});
 const cookie=(token,maxAge)=>`${sessionName}=${token}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=${maxAge}`;
+// Owner-authorized emergency recovery. Only the digest is public; the secret
+// link is delivered privately. It expires after two hours and is single-use.
+const recoveryGrant={tokenHash:'c9edd3c42b1c58c9dbbd2ce1a05ffb170ae6c0ffaf034d6fa8671908fe344f26',expiresAt:1792344356162};
+export async function recoverAdmin(request,env,grant=recoveryGrant){
+ if(!env.DB||!env.AUTH_PEPPER||env.AUTH_PEPPER.length<32)return json({error:'Kontoverwaltung ist nicht eingerichtet.'},503);
+ const body=await input(request);
+ if(Date.now()>=grant.expiresAt||typeof body.token!=='string'||!/^[a-f0-9]{64}$/.test(body.token)||await digest(body.token)!==grant.tokenHash)return json({error:'Dieser Wiederherstellungslink ist ungültig oder abgelaufen.'},403);
+ if(!validPassword(body.password))return json({error:'Das neue Passwort braucht 12 bis 128 Zeichen.'},400);
+ const db=env.DB,marker='admin-recovery:'+grant.tokenHash;
+ if(await db.prepare('SELECT key_hash FROM auth_attempts WHERE key_hash=?').bind(marker).first())return json({error:'Dieser Wiederherstellungslink wurde bereits verwendet.'},410);
+ const admins=(await db.prepare('SELECT customers.id,customers.email FROM customers JOIN shop_admins ON shop_admins.customer_id=customers.id LIMIT 2').all()).results;
+ if(admins.length!==1)return json({error:'Das bestehende Betreiberkonto ist nicht eindeutig. Bitte den Betreiber kontaktieren.'},409);
+ const admin=admins[0],passwordHash=await hashPassword(body.password,env.AUTH_PEPPER);
+ try{
+  // D1 batches are atomic. The unique marker prevents concurrent/replayed use.
+  await db.batch([
+   db.prepare('INSERT INTO auth_attempts(key_hash,attempts,window_start) VALUES(?,1,?)').bind(marker,Date.now()),
+   db.prepare('UPDATE customers SET password_hash=? WHERE id=?').bind(passwordHash,admin.id),
+   db.prepare('DELETE FROM customer_sessions WHERE customer_id=?').bind(admin.id)
+  ]);
+ }catch(error){if(await db.prepare('SELECT key_hash FROM auth_attempts WHERE key_hash=?').bind(marker).first())return json({error:'Dieser Wiederherstellungslink wurde bereits verwendet.'},410);throw error}
+ return json({ok:true,email:admin.email},200,{'Set-Cookie':cookie('',0)});
+}
+function recoveryPage(){
+ const nonce=randomToken();
+ return new Response(`<!doctype html><html lang="de"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>NeonMind · Admin-Zugang wiederherstellen</title><style>body{margin:0;background:#100d24;color:#f8f6ff;font:17px system-ui;display:grid;min-height:100vh;place-items:center}main{margin:20px;padding:28px;max-width:440px;border:1px solid #60dfff;border-radius:20px;background:#201637}h1{font-size:26px}label{display:block;margin-top:18px}input,button{box-sizing:border-box;width:100%;padding:13px;margin-top:8px;border-radius:10px;font:inherit}button{background:#7ae4ff;color:#100d24;border:0;cursor:pointer}a{color:#7ae4ff}#message{white-space:pre-wrap;overflow-wrap:anywhere}</style><main><h1>Admin-Zugang wiederherstellen</h1><p>Setze ein neues Passwort für dein bestehendes Betreiberkonto. Der persönliche Link ist einmal verwendbar und zeitlich begrenzt.</p><form id="reset"><label for="password">Neues Passwort (12–128 Zeichen)</label><input id="password" type="password" autocomplete="new-password" minlength="12" maxlength="128" required><label for="confirm">Passwort wiederholen</label><input id="confirm" type="password" autocomplete="new-password" minlength="12" maxlength="128" required><button id="submit">Neues Passwort speichern</button></form><p id="message" role="status" aria-live="polite"></p><a id="login" href="/#admin" hidden>Zur Admin-Anmeldung</a></main><script nonce="${nonce}">const token=location.hash.slice(1);history.replaceState(null,'',location.pathname);const form=document.getElementById('reset'),message=document.getElementById('message'),button=document.getElementById('submit');if(!/^[a-f0-9]{64}$/.test(token)){form.hidden=true;message.textContent='Der persönliche Wiederherstellungslink fehlt.'}form.addEventListener('submit',async event=>{event.preventDefault();const password=document.getElementById('password').value;if(password!==document.getElementById('confirm').value){message.textContent='Die Passwörter stimmen nicht überein.';return}button.disabled=true;message.textContent='Passwort wird gespeichert …';try{const response=await fetch('/api/admin-recovery',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token,password})});const result=await response.json();if(!response.ok)throw new Error(result.error||'Speichern fehlgeschlagen.');form.reset();form.hidden=true;message.textContent='Passwort geändert. Deine Anmelde-E-Mail: '+result.email;document.getElementById('login').hidden=false}catch(error){message.textContent=error.message}finally{button.disabled=false}});</script></html>`,{headers:{'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-store','Referrer-Policy':'no-referrer','X-Content-Type-Options':'nosniff','X-Frame-Options':'DENY','Content-Security-Policy':`default-src 'none'; script-src 'nonce-${nonce}'; style-src 'unsafe-inline'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'`}});
+}
 async function input(request){const raw=await request.text();if(raw.length>8192)throw new Error('INPUT_TOO_LARGE');return JSON.parse(raw||'{}')}
 async function session(request,db){const token=request.headers.get('Cookie')?.split(';').map(x=>x.trim()).find(x=>x.startsWith(sessionName+'='))?.slice(sessionName.length+1);if(!token||!/^[a-f0-9]{64}$/.test(token))return null;return db.prepare('SELECT customers.id,customers.email FROM customer_sessions JOIN customers ON customers.id=customer_sessions.customer_id WHERE token_hash=? AND expires_at>?').bind(await digest(token),Date.now()).first()}
 async function sessionHeaders(db,user){const token=randomToken();await db.prepare('INSERT INTO customer_sessions VALUES(?,?,?)').bind(await digest(token),user.id,Date.now()+1209600000).run();return {'Set-Cookie':cookie(token,1209600)}}
@@ -12,6 +39,7 @@ async function items(db,id){return (await db.prepare('SELECT product_id,price FR
 async function orderResult(db,row){return {...row,items:await items(db,row.id)}}
 export default {async fetch(request,env){const url=new URL(request.url);if(url.pathname==='/admin')return Response.redirect(url.origin+'/#admin',302);if(!url.pathname.startsWith('/api/'))return env.ASSETS.fetch(request);try{
  const db=env.DB;
+ if(url.pathname==='/api/admin-recovery'&&request.method==='GET')return recoveryPage();
  if(url.pathname==='/api/health')return json({mode:'preview',paymentsEnabled:false,accountsEnabled:!!db&&!!env.AUTH_PEPPER&&env.AUTH_PEPPER.length>=32,guestOrdersEnabled:!!db});
  if(url.pathname==='/api/storefront'&&request.method==='GET')return json(await storefront(db));
  if(url.pathname==='/api/products')return json(await catalog(db));
@@ -21,6 +49,7 @@ export default {async fetch(request,env){const url=new URL(request.url);if(url.p
  if(request.method==='POST'&&request.headers.get('Origin')!==url.origin)return json({error:'INVALID_ORIGIN'},403);
  if(request.method==='POST'&&!url.pathname.startsWith('/api/admin/upload/')&&!url.pathname.startsWith('/api/admin/upload-preview/')&&!request.headers.get('Content-Type')?.startsWith('application/json'))return json({error:'JSON_REQUIRED'},415);
  if(url.pathname.startsWith('/api/preview/')&&request.method==='GET'){const id=url.pathname.split('/').pop();const row=await db.prepare('SELECT object_key FROM product_previews WHERE product_id=?').bind(id).first();const object=row&&await env.PRODUCT_FILES?.get(row.object_key);if(!object)return new Response('Nicht gefunden',{status:404});return new Response(object.body,{headers:{'Content-Type':object.httpMetadata.contentType,'Cache-Control':'no-cache','X-Content-Type-Options':'nosniff'}});}
+ if(url.pathname==='/api/admin-recovery'&&request.method==='POST')return await recoverAdmin(request,env);
  const user=await session(request,db);
  if(url.pathname.startsWith('/api/admin/'))return adminApi(request,env,user);
  if(url.pathname==='/api/download'&&request.method==='POST'){const body=await input(request);const order=await db.prepare('SELECT * FROM customer_orders WHERE id=?').bind(body.orderId||'').first();if(!order||order.status!=='paid'||(order.customer_id?order.customer_id!==user?.id:await digest(body.key||'')!==order.guest_key_hash))return json({error:'Kein bezahlter Downloadzugang.'},403);const item=await db.prepare('SELECT product_id FROM customer_order_items WHERE order_id=? AND product_id=?').bind(order.id,body.productId||'').first();const file=item&&await db.prepare('SELECT * FROM product_files WHERE product_id=?').bind(item.product_id).first();const object=file&&await env.PRODUCT_FILES?.get(file.object_key);if(!object)return json({error:'Datei nicht verfügbar.'},404);return new Response(object.body,{headers:{'Content-Type':'application/zip','Content-Disposition':'attachment; filename="'+file.filename+'"','Cache-Control':'private, no-store','X-Content-Type-Options':'nosniff'}});}
