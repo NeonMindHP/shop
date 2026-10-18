@@ -26,3 +26,46 @@ test('product trash hides baseline and custom products, restores drafts and pres
  assert.equal((await f.request('/api/admin/product-trash',{id:'missing',action:'delete'})).status,404);assert.equal((await f.request('/api/admin/product-trash',{id:'aurora',action:'erase'})).status,400);
  const cross=await worker.fetch(new Request('https://shop.test/api/admin/product-trash',{method:'POST',headers:{Origin:'https://evil.test',Cookie:f.cookie,'Content-Type':'application/json'},body:JSON.stringify({id:'aurora',action:'delete'})}),f.env);assert.equal(cross.status,403);
  }finally{f.close()}});
+
+// Test grants use independent random tokens; the owner's recovery secret is
+// never stored in this repository or used by tests.
+import {recoverAdmin} from '../worker/index.mjs';
+import {digest,randomToken} from '../worker/auth.mjs';
+test('owner recovery resets only the single existing admin, invalidates sessions and cannot be replayed',async()=>{
+ const f=fixture();try{
+  const admin=await f.request('/api/register',{email:'recover-admin@example.com',password:'old-admin-password'});
+  f.sqlite.prepare('INSERT INTO shop_admins VALUES(?)').run(admin.data.user.id);const oldCookie=f.cookie;
+  await f.request('/api/register',{email:'customer@example.com',password:'untouched-customer-password'});
+  const customerHash=f.sqlite.prepare('SELECT password_hash FROM customers WHERE email=?').get('customer@example.com').password_hash;
+  const token=randomToken(),grant={tokenHash:await digest(token),expiresAt:Date.now()+60000};
+  const reset=(secret=token,password='replacement-admin-password',config=grant)=>recoverAdmin(new Request('https://shop.test/api/admin-recovery',{method:'POST',body:JSON.stringify({token:secret,password})}),f.env,config);
+  assert.equal((await reset('0'.repeat(64))).status,403);
+  assert.equal((await reset(token,'short')).status,400);
+  assert.equal((await reset(token,'replacement-admin-password',{...grant,expiresAt:0})).status,403);
+  const result=await reset();assert.equal(result.status,200);assert.equal((await result.json()).email,'recover-admin@example.com');
+  assert.equal((await f.request('/api/me',undefined,oldCookie)).data.user,null);
+  assert.equal((await reset()).status,410);
+  assert.equal(f.sqlite.prepare('SELECT password_hash FROM customers WHERE email=?').get('customer@example.com').password_hash,customerHash);
+  assert.equal((await f.request('/api/login',{email:'recover-admin@example.com',password:'old-admin-password'})).status,401);
+  assert.equal((await f.request('/api/login',{email:'recover-admin@example.com',password:'replacement-admin-password'})).status,200);
+  assert.equal((await f.request('/api/admin/state')).status,200);
+ }finally{f.close()}
+});
+test('recovery refuses missing or ambiguous administrators and parallel token use',async()=>{
+ const f=fixture();try{
+  const token=randomToken(),grant={tokenHash:await digest(token),expiresAt:Date.now()+60000};
+  const reset=()=>recoverAdmin(new Request('https://shop.test/api/admin-recovery',{method:'POST',body:JSON.stringify({token,password:'replacement-admin-password'})}),f.env,grant);
+  assert.equal((await reset()).status,409);
+  const a=await f.request('/api/register',{email:'first@example.com',password:'first-admin-password'}),b=await f.request('/api/register',{email:'second@example.com',password:'second-admin-password'});
+  f.sqlite.prepare('INSERT INTO shop_admins VALUES(?)').run(a.data.user.id);f.sqlite.prepare('INSERT INTO shop_admins VALUES(?)').run(b.data.user.id);
+  assert.equal((await reset()).status,409);
+  f.sqlite.prepare('DELETE FROM shop_admins WHERE customer_id=?').run(b.data.user.id);
+  const results=await Promise.all([reset(),reset()]);assert.deepEqual(results.map(r=>r.status).sort(),[200,410]);
+ }finally{f.close()}
+});
+test('recovery route checks origin and serves a non-cached page with no third-party resources',async()=>{
+ const f=fixture();try{
+  const blocked=await worker.fetch(new Request('https://shop.test/api/admin-recovery',{method:'POST',headers:{Origin:'https://evil.test','Content-Type':'application/json'},body:'{}'}),f.env);assert.equal(blocked.status,403);
+  const page=await worker.fetch(new Request('https://shop.test/api/admin-recovery'),f.env);assert.equal(page.status,200);assert.equal(page.headers.get('Cache-Control'),'no-store');assert.equal(page.headers.get('Referrer-Policy'),'no-referrer');assert.match(page.headers.get('Content-Security-Policy'),/frame-ancestors 'none'/);assert.match(await page.text(),/history.replaceState/);
+ }finally{f.close()}
+});
