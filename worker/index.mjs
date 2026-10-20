@@ -1,47 +1,25 @@
+import {paymentState,checkoutApi,stripeWebhook} from './payments.mjs';
+import {validateDesign} from './design.mjs';
+import {coreApi,maintenance,isAdmin} from './core.mjs';
+import {queueMessage,flushNotifications} from './mail.mjs';
 import {adminApi, catalog, storefront} from './admin.mjs';
 import {products} from '../dist/catalog.js';
 import {randomToken,digest,hashPassword,verifyPassword,normalizeEmail,validEmail,validPassword} from './auth.mjs';
 const sessionName='nm_session';
 const json=(data,status=200,headers={})=>new Response(JSON.stringify(data),{status,headers:{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff',...headers}});
 const cookie=(token,maxAge)=>`${sessionName}=${token}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=${maxAge}`;
-// Owner-authorized emergency recovery. Only the digest is public; the secret
-// link is delivered privately. It expires after two hours and is single-use.
-const recoveryGrant={tokenHash:'c9edd3c42b1c58c9dbbd2ce1a05ffb170ae6c0ffaf034d6fa8671908fe344f26',expiresAt:1792344356162};
-export async function recoverAdmin(request,env,grant=recoveryGrant){
- if(!env.DB||!env.AUTH_PEPPER||env.AUTH_PEPPER.length<32)return json({error:'Kontoverwaltung ist nicht eingerichtet.'},503);
- const body=await input(request);
- if(Date.now()>=grant.expiresAt||typeof body.token!=='string'||!/^[a-f0-9]{64}$/.test(body.token)||await digest(body.token)!==grant.tokenHash)return json({error:'Dieser Wiederherstellungslink ist ungültig oder abgelaufen.'},403);
- if(!validPassword(body.password))return json({error:'Das neue Passwort braucht 12 bis 128 Zeichen.'},400);
- const db=env.DB,marker='admin-recovery:'+grant.tokenHash;
- if(await db.prepare('SELECT key_hash FROM auth_attempts WHERE key_hash=?').bind(marker).first())return json({error:'Dieser Wiederherstellungslink wurde bereits verwendet.'},410);
- const admins=(await db.prepare('SELECT customers.id,customers.email FROM customers JOIN shop_admins ON shop_admins.customer_id=customers.id LIMIT 2').all()).results;
- if(admins.length!==1)return json({error:'Das bestehende Betreiberkonto ist nicht eindeutig. Bitte den Betreiber kontaktieren.'},409);
- const admin=admins[0],passwordHash=await hashPassword(body.password,env.AUTH_PEPPER);
- try{
-  // D1 batches are atomic. The unique marker prevents concurrent/replayed use.
-  await db.batch([
-   db.prepare('INSERT INTO auth_attempts(key_hash,attempts,window_start) VALUES(?,1,?)').bind(marker,Date.now()),
-   db.prepare('UPDATE customers SET password_hash=? WHERE id=?').bind(passwordHash,admin.id),
-   db.prepare('DELETE FROM customer_sessions WHERE customer_id=?').bind(admin.id)
-  ]);
- }catch(error){if(await db.prepare('SELECT key_hash FROM auth_attempts WHERE key_hash=?').bind(marker).first())return json({error:'Dieser Wiederherstellungslink wurde bereits verwendet.'},410);throw error}
- return json({ok:true,email:admin.email},200,{'Set-Cookie':cookie('',0)});
-}
-function recoveryPage(){
- const nonce=randomToken();
- return new Response(`<!doctype html><html lang="de"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>NeonMind · Admin-Zugang wiederherstellen</title><style>body{margin:0;background:#100d24;color:#f8f6ff;font:17px system-ui;display:grid;min-height:100vh;place-items:center}main{margin:20px;padding:28px;max-width:440px;border:1px solid #60dfff;border-radius:20px;background:#201637}h1{font-size:26px}label{display:block;margin-top:18px}input,button{box-sizing:border-box;width:100%;padding:13px;margin-top:8px;border-radius:10px;font:inherit}button{background:#7ae4ff;color:#100d24;border:0;cursor:pointer}a{color:#7ae4ff}#message{white-space:pre-wrap;overflow-wrap:anywhere}</style><main><h1>Admin-Zugang wiederherstellen</h1><p>Setze ein neues Passwort für dein bestehendes Betreiberkonto. Der persönliche Link ist einmal verwendbar und zeitlich begrenzt.</p><form id="reset"><label for="password">Neues Passwort (12–128 Zeichen)</label><input id="password" type="password" autocomplete="new-password" minlength="12" maxlength="128" required><label for="confirm">Passwort wiederholen</label><input id="confirm" type="password" autocomplete="new-password" minlength="12" maxlength="128" required><button id="submit">Neues Passwort speichern</button></form><p id="message" role="status" aria-live="polite"></p><a id="login" href="/#admin" hidden>Zur Admin-Anmeldung</a></main><script nonce="${nonce}">const token=location.hash.slice(1);history.replaceState(null,'',location.pathname);const form=document.getElementById('reset'),message=document.getElementById('message'),button=document.getElementById('submit');if(!/^[a-f0-9]{64}$/.test(token)){form.hidden=true;message.textContent='Der persönliche Wiederherstellungslink fehlt.'}form.addEventListener('submit',async event=>{event.preventDefault();const password=document.getElementById('password').value;if(password!==document.getElementById('confirm').value){message.textContent='Die Passwörter stimmen nicht überein.';return}button.disabled=true;message.textContent='Passwort wird gespeichert …';try{const response=await fetch('/api/admin-recovery',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token,password})});const result=await response.json();if(!response.ok)throw new Error(result.error||'Speichern fehlgeschlagen.');form.reset();form.hidden=true;message.textContent='Passwort geändert. Deine Anmelde-E-Mail: '+result.email;document.getElementById('login').hidden=false}catch(error){message.textContent=error.message}finally{button.disabled=false}});</script></html>`,{headers:{'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-store','Referrer-Policy':'no-referrer','X-Content-Type-Options':'nosniff','X-Frame-Options':'DENY','Content-Security-Policy':`default-src 'none'; script-src 'nonce-${nonce}'; style-src 'unsafe-inline'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'`}});
-}
 async function input(request){const raw=await request.text();if(raw.length>8192)throw new Error('INPUT_TOO_LARGE');return JSON.parse(raw||'{}')}
-async function session(request,db){const token=request.headers.get('Cookie')?.split(';').map(x=>x.trim()).find(x=>x.startsWith(sessionName+'='))?.slice(sessionName.length+1);if(!token||!/^[a-f0-9]{64}$/.test(token))return null;return db.prepare('SELECT customers.id,customers.email FROM customer_sessions JOIN customers ON customers.id=customer_sessions.customer_id WHERE token_hash=? AND expires_at>?').bind(await digest(token),Date.now()).first()}
+async function session(request,db){const token=request.headers.get('Cookie')?.split(';').map(x=>x.trim()).find(x=>x.startsWith(sessionName+'='))?.slice(sessionName.length+1);if(!token||!/^[a-f0-9]{64}$/.test(token))return null;return db.prepare('SELECT customers.id,customers.email FROM customer_sessions JOIN customers ON customers.id=customer_sessions.customer_id WHERE token_hash=? AND expires_at>? AND NOT EXISTS (SELECT 1 FROM shop_user_state WHERE customer_id=customers.id AND blocked=1)').bind(await digest(token),Date.now()).first()}
 async function sessionHeaders(db,user){const token=randomToken();await db.prepare('INSERT INTO customer_sessions VALUES(?,?,?)').bind(await digest(token),user.id,Date.now()+1209600000).run();return {'Set-Cookie':cookie(token,1209600)}}
 async function limited(request,db,email){const key=await digest((request.headers.get('CF-Connecting-IP')||'local')+'|'+email),now=Date.now();await db.prepare('INSERT INTO auth_attempts(key_hash,attempts,window_start) VALUES(?,1,?) ON CONFLICT(key_hash) DO UPDATE SET attempts=CASE WHEN window_start<? THEN 1 ELSE attempts+1 END,window_start=CASE WHEN window_start<? THEN excluded.window_start ELSE window_start END').bind(key,now,now-900000,now-900000).run();const row=await db.prepare('SELECT attempts FROM auth_attempts WHERE key_hash=?').bind(key).first();return row.attempts>10}
 async function items(db,id){return (await db.prepare('SELECT product_id,price FROM customer_order_items WHERE order_id=?').bind(id).all()).results}
-async function orderResult(db,row){return {...row,items:await items(db,row.id)}}
-export default {async fetch(request,env){const url=new URL(request.url);if(url.pathname==='/admin')return Response.redirect(url.origin+'/#admin',302);if(!url.pathname.startsWith('/api/'))return env.ASSETS.fetch(request);try{
+async function orderResult(db,row){const draft=await db.prepare('SELECT design FROM customer_order_designs WHERE order_id=?').bind(row.id).first();return {...row,items:await items(db,row.id),design:draft?JSON.parse(draft.design):null}}
+export default {async fetch(request,env,ctx){const url=new URL(request.url);const maintenanceState=await maintenance(env);if(maintenanceState.enabled){const operator=await isAdmin(env,await session(request,env.DB));if(!operator&&!url.pathname.startsWith('/api/')&&(!/\.[a-z0-9]+$/i.test(url.pathname)||/\.html$/i.test(url.pathname))&&!/^\/(admin|login|kontakt|impressum(?:\.html)?|datenschutz(?:\.html)?)\/?$/.test(url.pathname))return new Response(await (await env.ASSETS.fetch(new Request(new URL('/maintenance',url)))).text(),{status:503,headers:{'Content-Type':'text/html;charset=utf-8','Cache-Control':'no-store','Retry-After':'3600'}});}if(/^\/(?:collections(?:\/.*)?|product\/[a-z0-9-]+|wuensche|account|login|register|downloads|checkout|guest|success\/[^/]+|info|admin|kontakt)\/?$/.test(url.pathname)){const asset=new URL('/',url);return env.ASSETS.fetch(new Request(asset,request));}if(!url.pathname.startsWith('/api/'))return env.ASSETS.fetch(request);if(/^\/api\/payments\/stripe\/webhook(?:\/test)?$/.test(url.pathname)&&request.method==='POST'){try{const result=await stripeWebhook(request,env);if(result.ok&&ctx)ctx.waitUntil(flushNotifications(env).catch(()=>{}));return result}catch{return json({error:'Zahlungsnachricht konnte nicht verarbeitet werden.'},500)}}try{
  const db=env.DB;
- if(url.pathname==='/api/admin-recovery'&&request.method==='GET')return recoveryPage();
- if(url.pathname==='/api/health')return json({mode:'preview',paymentsEnabled:false,accountsEnabled:!!db&&!!env.AUTH_PEPPER&&env.AUTH_PEPPER.length>=32,guestOrdersEnabled:!!db});
+ if(url.pathname==='/api/maintenance'&&request.method==='GET')return json(maintenanceState);
+ if(url.pathname==='/api/health')return json({mode:(await paymentState(env)).paymentsEnabled?'live':'setup',...(await paymentState(env)),accountsEnabled:!!db&&!!env.AUTH_PEPPER&&env.AUTH_PEPPER.length>=32,guestOrdersEnabled:!!db});
  if(url.pathname==='/api/storefront'&&request.method==='GET')return json(await storefront(db));
+ if(maintenanceState.enabled&&/^\/api\/(products|storefront|gallery(?:-image)?)(?:\/|$)/.test(url.pathname)&&!await isAdmin(env,await session(request,db)))return json({error:'Der Shop ist im Wartungsmodus.'},503);
  if(url.pathname==='/api/products')return json(await catalog(db));
  if(url.pathname.startsWith('/api/gallery/')&&request.method==='GET'){const id=url.pathname.split('/').pop();const rows=(await db.prepare('SELECT position,title FROM product_gallery WHERE product_id=? ORDER BY position').bind(id).all()).results;return json(rows.map(r=>({title:r.title,image:'/api/gallery-image/'+id+'/'+r.position})));}
  if(url.pathname.startsWith('/api/gallery-image/')&&request.method==='GET'){const parts=url.pathname.split('/');const row=await db.prepare('SELECT object_key FROM product_gallery WHERE product_id=? AND position=?').bind(parts[3],Number(parts[4])).first();const object=row&&await env.PRODUCT_FILES?.get(row.object_key);if(!object)return new Response('Nicht gefunden',{status:404});return new Response(object.body,{headers:{'Content-Type':'image/jpeg','Cache-Control':'public, max-age=300','X-Content-Type-Options':'nosniff'}});}
@@ -49,10 +27,23 @@ export default {async fetch(request,env){const url=new URL(request.url);if(url.p
  if(request.method==='POST'&&request.headers.get('Origin')!==url.origin)return json({error:'INVALID_ORIGIN'},403);
  if(request.method==='POST'&&!url.pathname.startsWith('/api/admin/upload/')&&!url.pathname.startsWith('/api/admin/upload-preview/')&&!request.headers.get('Content-Type')?.startsWith('application/json'))return json({error:'JSON_REQUIRED'},415);
  if(url.pathname.startsWith('/api/preview/')&&request.method==='GET'){const id=url.pathname.split('/').pop();const row=await db.prepare('SELECT object_key FROM product_previews WHERE product_id=?').bind(id).first();const object=row&&await env.PRODUCT_FILES?.get(row.object_key);if(!object)return new Response('Nicht gefunden',{status:404});return new Response(object.body,{headers:{'Content-Type':object.httpMetadata.contentType,'Cache-Control':'no-cache','X-Content-Type-Options':'nosniff'}});}
- if(url.pathname==='/api/admin-recovery'&&request.method==='POST')return await recoverAdmin(request,env);
+
+ if(['/api/inquiries','/api/contact'].includes(url.pathname)&&request.method==='POST'){
+  const b=await input(request);const clean=(v,max)=>typeof v==='string'?v.trim().slice(0,max+1):'';
+  const name=clean(b.name,100),email=normalizeEmail(clean(b.email,180)),product=clean(url.pathname==='/api/contact'?(b.subject||'Kontakt'):b.product,120),system=clean(url.pathname==='/api/contact'?'Kontakt':b.system,180),message=clean(b.message,3000);
+  if(b.website||b.consent!==true||name.length<2||name.length>100||!validEmail(email)||email.length>180||!product||product.length>120||!system||system.length>180||message.length<20||message.length>3000)return json({error:'Bitte alle Pflichtfelder und die Datenschutzhinweise prüfen.'},400);
+  if(await limited(request,db,'inquiry'))return json({error:'Zu viele Anfragen. Bitte später erneut versuchen.'},429);
+  const id=crypto.randomUUID(),now=Date.now();
+  await db.batch([db.prepare('DELETE FROM customization_inquiries WHERE created_at<?').bind(now-90*86400000),db.prepare('INSERT INTO customization_inquiries VALUES(?,?,?,?,?,?,?)').bind(id,name,email,product,system,message,now)]);
+  await queueMessage(env,{id,kind:url.pathname==='/api/contact'?'contact':'wish',name,email,subject:(url.pathname==='/api/contact'?'Kontakt · ':'Wunschanfrage · ')+product,body:'Bereich: '+system+'\n'+message,created_at:now});if(ctx)ctx.waitUntil(flushNotifications(env).catch(()=>{}));
+  return json({ok:true,id},201);
+ }
  const user=await session(request,db);
+ if(['/api/checkout','/api/admin/payments','/api/admin/test-order','/api/admin/payment-audit'].includes(url.pathname)){if(request.method==='POST'&&await limited(request,db,'checkout'))return json({error:'Zu viele Bestellversuche.'},429);return checkoutApi(request,env,user);}
+ if(maintenanceState.enabled&&url.pathname==='/api/orders/demo'&&!await isAdmin(env,user))return json({error:'Der Shop ist vorübergehend im Wartungsmodus.'},503);
+ if(/^\/api\/admin\/(core|mailbox|maintenance|users|mail-settings|mail-test|mail-retry)$/.test(url.pathname))return coreApi(request,env,user);
  if(url.pathname.startsWith('/api/admin/'))return adminApi(request,env,user);
- if(url.pathname==='/api/download'&&request.method==='POST'){const body=await input(request);const order=await db.prepare('SELECT * FROM customer_orders WHERE id=?').bind(body.orderId||'').first();if(!order||order.status!=='paid'||(order.customer_id?order.customer_id!==user?.id:await digest(body.key||'')!==order.guest_key_hash))return json({error:'Kein bezahlter Downloadzugang.'},403);const item=await db.prepare('SELECT product_id FROM customer_order_items WHERE order_id=? AND product_id=?').bind(order.id,body.productId||'').first();const file=item&&await db.prepare('SELECT * FROM product_files WHERE product_id=?').bind(item.product_id).first();const object=file&&await env.PRODUCT_FILES?.get(file.object_key);if(!object)return json({error:'Datei nicht verfügbar.'},404);return new Response(object.body,{headers:{'Content-Type':'application/zip','Content-Disposition':'attachment; filename="'+file.filename+'"','Cache-Control':'private, no-store','X-Content-Type-Options':'nosniff'}});}
+ if(url.pathname==='/api/download'&&request.method==='POST'){const body=await input(request);const order=await db.prepare('SELECT * FROM customer_orders WHERE id=?').bind(body.orderId||'').first();if(!order||!(order.status==='paid'||order.status==='test_paid'&&await isAdmin(env,user)&&order.customer_id===user.id)||(order.customer_id?order.customer_id!==user?.id:await digest(body.key||'')!==order.guest_key_hash))return json({error:'Kein bezahlter Downloadzugang.'},403);const item=await db.prepare('SELECT product_id FROM customer_order_items WHERE order_id=? AND product_id=?').bind(order.id,body.productId||'').first();const file=item&&await db.prepare('SELECT * FROM product_files WHERE product_id=?').bind(item.product_id).first();const object=file&&await env.PRODUCT_FILES?.get(file.object_key);if(!object)return json({error:'Datei nicht verfügbar.'},404);await db.prepare('INSERT INTO shop_download_log VALUES(?,?,?,?)').bind(crypto.randomUUID(),order.id,item.product_id,Date.now()).run();return new Response(object.body,{headers:{'Content-Type':'application/zip','Content-Disposition':'attachment; filename="'+file.filename+'"','Cache-Control':'private, no-store','X-Content-Type-Options':'nosniff'}});}
  if(url.pathname==='/api/me'&&request.method==='GET')return json({user});
  if(['/api/register','/api/login'].includes(url.pathname)&&request.method==='POST'){
   if(!env.AUTH_PEPPER||env.AUTH_PEPPER.length<32)return json({error:'AUTH_NOT_CONFIGURED'},503);
@@ -64,6 +55,7 @@ export default {async fetch(request,env){const url=new URL(request.url);if(url.p
    account={id:crypto.randomUUID(),email,password_hash:await hashPassword(body.password,env.AUTH_PEPPER)};
    try{await db.prepare('INSERT INTO customers VALUES(?,?,?,?)').bind(account.id,email,account.password_hash,Date.now()).run()}catch{return json({error:'Konto konnte nicht angelegt werden.'},409)}
   }else{
+   if(account&&await db.prepare('SELECT customer_id FROM shop_user_state WHERE customer_id=? AND blocked=1').bind(account.id).first())return json({error:'Dieses Konto ist gesperrt. Bitte kontaktiere den Shop.'},403);
    const fallback='v1$'+'0'.repeat(64)+'$'+'0'.repeat(64);
    if(!await verifyPassword(body.password,account?.password_hash||fallback,env.AUTH_PEPPER)||!account)return json({error:'E-Mail oder Passwort ist nicht korrekt.'},401);
   }
@@ -72,13 +64,17 @@ export default {async fetch(request,env){const url=new URL(request.url);if(url.p
  if(url.pathname==='/api/logout'&&request.method==='POST'){const token=request.headers.get('Cookie')?.match(/(?:^|;\s*)nm_session=([a-f0-9]{64})/)?.[1];if(token)await db.prepare('DELETE FROM customer_sessions WHERE token_hash=?').bind(await digest(token)).run();return json({ok:true},200,{'Set-Cookie':cookie('',0)})}
  if(url.pathname==='/api/orders'&&request.method==='GET'){if(!user)return json({error:'UNAUTHORIZED'},401);const rows=(await db.prepare('SELECT id,amount,status,created_at FROM customer_orders WHERE customer_id=? ORDER BY created_at DESC LIMIT 100').bind(user.id).all()).results;return json({orders:await Promise.all(rows.map(row=>orderResult(db,row)))})}
  if(url.pathname==='/api/orders/demo'&&request.method==='POST'){
+  if(env.DEMO_CHECKOUT_ENABLED!=='true'&&!await isAdmin(env,user))return json({error:'Testbestellungen sind nur für Betreiber verfügbar.'},403);
+  if(await limited(request,db,'order'))return json({error:'Zu viele Bestellversuche. Bitte später erneut versuchen.'},429);
   const body=await input(request);if(!['guest','account'].includes(body.purchaseMode)||body.purchaseMode==='account'&&!user)return json({error:'Bitte anmelden oder Gastkauf wählen.'},401);
   if(!Array.isArray(body.items)||!body.items.length||body.items.length>100||new Set(body.items).size!==body.items.length)return json({error:'INVALID_CART'},400);
+  let design;try{design=validateDesign(body.design,body.items)}catch{return json({error:'Der Designentwurf ist ungültig. Bitte im Gestalter erneut sichern.'},400)}if(body.items.includes('designstudio')&&design?.productId!=='designstudio')return json({error:'Bitte zuerst deinen Entwurf im Gestalter auswählen.'},400);
   const current=await catalog(db);const selected=body.items.map(id=>current.find(p=>p.id===id));if(selected.some(p=>!p))return json({error:'INVALID_PRODUCT'},400);
   if(body.result!=='success')return json({error:body.result==='pending'?'Zahlung ausstehend. Kein neuer Download freigegeben.':'Testzahlung fehlgeschlagen. Kein neuer Download freigegeben.'},409);
   const id=crypto.randomUUID(),key=randomToken(),amount=selected.reduce((n,p)=>n+p.price,0),created=Date.now();
-  await db.batch([db.prepare('INSERT INTO customer_orders VALUES(?,?,?,?,?,?)').bind(id,body.purchaseMode==='account'?user.id:null,await digest(key),amount,'demo',created),...selected.map(p=>db.prepare('INSERT INTO customer_order_items VALUES(?,?,?)').bind(id,p.id,p.price))]);
-  return json({order:{id,amount,status:'demo',created_at:created,items:selected.map(p=>({product_id:p.id,price:p.price}))},guestKey:body.purchaseMode==='guest'?key:null},201);
+  await db.batch([db.prepare('INSERT INTO customer_orders VALUES(?,?,?,?,?,?)').bind(id,body.purchaseMode==='account'?user.id:null,await digest(key),amount,'demo',created),...selected.map(p=>db.prepare('INSERT INTO customer_order_items VALUES(?,?,?)').bind(id,p.id,p.price)),...(design?[db.prepare('INSERT INTO customer_order_designs VALUES(?,?)').bind(id,JSON.stringify(design))]:[])]);
+  await queueMessage(env,{id:'order:'+id,kind:'demo',name:user?.email||'Gast',email:user?.email||'',subject:'Testbestellung · '+id.slice(0,8),body:'Testkauf ohne Zahlung\n'+selected.map(p=>p.name).join('\n')+'\nBetrag: '+(amount/100).toFixed(2)+' EUR'+(design?'\n\nDesignentwurf (JSON):\n'+JSON.stringify(design,null,2):''),created_at:created});if(ctx)ctx.waitUntil(flushNotifications(env).catch(()=>{}));
+  return json({order:{id,amount,status:'demo',created_at:created,design,items:selected.map(p=>({product_id:p.id,price:p.price}))},guestKey:body.purchaseMode==='guest'?key:null},201);
  }
  if(['/api/guest/order','/api/guest/claim'].includes(url.pathname)&&request.method==='POST'){
   const body=await input(request);if(typeof body.key!=='string'||!/^[a-f0-9]{64}$/.test(body.key))return json({error:'Bestellschlüssel ist nicht gültig.'},400);
@@ -88,4 +84,4 @@ export default {async fetch(request,env){const url=new URL(request.url);if(url.p
   const result=await orderResult(db,row);delete result.customer_id;return json({order:result});
  }
  return json({error:'NOT_FOUND'},404);
- }catch(error){return json({error:error.message==='INPUT_TOO_LARGE'?'Anfrage ist zu groß.':'Anfrage konnte nicht verarbeitet werden.'},error.message==='INPUT_TOO_LARGE'?413:400)}}};
+ }catch(error){return json({error:error.message==='INPUT_TOO_LARGE'?'Anfrage ist zu groß.':'Anfrage konnte nicht verarbeitet werden.'},error.message==='INPUT_TOO_LARGE'?413:400)}},async scheduled(event,env,ctx){ctx.waitUntil(flushNotifications(env));}};

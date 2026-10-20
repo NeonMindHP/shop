@@ -1,0 +1,13 @@
+User-agent: *
+Allow: /
+Disallow: /api/
+Disallow: /admin
+Disallow: /account
+Disallow: /login
+Disallow: /register
+Disallow: /downloads
+Disallow: /checkout
+Disallow: /guest
+Disallow: /success/
+Disallow: /demos/
+Sitemap: https://shop.neonmind-ai.com/sitemap.xml

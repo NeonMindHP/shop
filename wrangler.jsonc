@@ -19,15 +19,23 @@
   "assets": {
     "directory": "./dist",
     "binding": "ASSETS",
-    "run_worker_first": [
-      "/api/*",
-      "/admin"
-    ]
+    "run_worker_first": true
   },
   "r2_buckets": [
     {
       "binding": "PRODUCT_FILES",
       "bucket_name": "neonmind-shop-private"
     }
-  ]
+  ],
+  "routes": [
+    {
+      "zone_id": "74af5252c868209225c885df8f15815b",
+      "pattern": "shop.neonmind-ai.com/*"
+    }
+  ],
+  "triggers": {
+    "crons": [
+      "*/15 * * * *"
+    ]
+  }
 }

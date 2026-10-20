@@ -11,3 +11,10 @@ textarea{width:100%;background:#080d20;color:#f3f7ff;border:1px solid #30405b;bo
 .collection-card img{object-fit:contain;background:#020914}.product-image{object-fit:contain;background:#020914}
 .button.danger{border-color:#f15b75;color:#ff9aad;background:#381724}.product-trash{margin-top:28px;border-top:1px solid #35405a;padding-top:20px}.product-trash summary{cursor:pointer;font-weight:700}.trash-item{display:grid;gap:10px;margin:20px 0}#deleteConfirmation{margin-top:16px;padding:18px;border:1px solid #c9556f;border-radius:12px}#deleteConfirmation[hidden]{display:none}
 [hidden]{display:none!important}
+
+
+/* User supplied NeonMind Shop logo. */
+header .brand{display:block;flex-shrink:0;line-height:0}header .shop-brand-image{display:block;width:275px;height:auto;object-fit:contain;max-width:100%}header nav{gap:20px}@media(max-width:1150px){header{flex-wrap:wrap}header nav{order:3;width:100%;flex-wrap:wrap}header #cartButton{margin-left:auto}}@media(max-width:640px){header .shop-brand-image{width:200px}header{padding:16px}header nav{gap:10px 16px}}@media(max-width:360px){header .brand{flex-basis:100%}header .shop-brand-image{width:230px}header #cartButton{margin-left:auto}}
+
+/* Artist Launch */
+.artist-offer h2{font-size:clamp(26px,3vw,40px);line-height:1.1;margin:14px 0}.artist-choice{margin-top:22px;padding:20px;border:1px solid #304b66;border-radius:14px;background:#081424}.artist-choice label{display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-weight:700}.artist-choice input{accent-color:#00d9ef;width:20px;height:20px}.artist-choice p{font-size:14px}.artist-total{display:flex;justify-content:space-between;align-items:center;gap:15px;margin:20px 0}.artist-total strong{font-size:32px;color:#65edff}.artist-brief{display:block;margin-top:18px;font-size:14px}.artist-choice .button{white-space:normal;text-align:center}

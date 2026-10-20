@@ -1,0 +1,18 @@
+export function artistOffer(p) {
+  if (p.id === 'artist-launch-personalisierung') return `<div class="notice artist-offer"><strong>Persönliche Anpassung · zusätzlich 99 €</strong><p>Für dein vorhandenes Artist-Launch-Paket: Wir setzen einen Künstlernamen, dein vorhandenes Logo, eine der drei Farbwelten und deine gelieferten Texte ein. Enthalten sind eine gebündelte Korrekturrunde und die Übergabe der angepassten Dateien.</p><p>Das Basispaket kostet separat 79 €. Neu zusammen: <b>178 €</b>. Neues Logo, Fotoretusche, Animation und Website-Hosting sind separate Leistungen.</p><a class="button" href="/product/artist-launch">Zum Basispaket →</a> <a class="button primary" href="/anpassung.html?produkt=artist-launch-personalisierung">Briefing übermitteln →</a><p class="muted">Dienstleistung nach persönlicher Abstimmung, kein zusätzlicher Sofortdownload. Liefertermin wird nach Prüfung deiner vollständigen Inhalte vereinbart.</p></div>`;
+  if(['radio-launch','clan-launch','designstudio'].includes(p.id)){const id=p.id,cat=id==='radio-launch'?'radio':id==='clan-launch'?'gaming':'dj';return `<div class="notice artist-offer"><h2>Gestalte deinen Auftritt.</h2><p>Probiere Namen, Farben, Hintergründe und Textpositionen direkt im Designstudio aus. Dein Entwurf wird bei der Bestellung gespeichert.</p><a class="button primary" href="/gestalter.html?category=${cat}${id==='designstudio'?'':'&package='+id}">Deinen Look gestalten →</a><a class="button" href="${p.demo}">Paketvorschau ansehen →</a></div>`;}if(['radio-launch-personalisierung','clan-launch-personalisierung','designstudio-personalisierung'].includes(p.id))return `<div class="notice artist-offer"><h2>Dein Entwurf. Unsere Umsetzung.</h2><p>${p.description}</p><a class="button primary" href="/anpassung.html?produkt=${p.id}">Briefing übermitteln →</a></div>`;
+  if (p.id !== 'artist-launch') return '';
+  return `<div class="notice artist-offer"><span class="kicker">Dein Sound. Dein Auftritt.</span><h2>Vom ersten Mix<br>bis zum nächsten Booking.</h2><p>Drei Farbwelten, DJ-Kanalgrafiken, Mix- und Release-Cover, Showposter, ein bearbeitbares Artist-Profil als Website und ein Presskit. Namen und Texte liegen als bearbeitbare Elemente vor.</p><a class="button" href="/demos/artist-launch/" target="_blank" rel="noopener">Als Beispielkunde ausprobieren ↗</a><div class="artist-choice"><label><input id="artistPersonal" type="checkbox"> Persönlich anpassen lassen <b>+99 €</b></label><p>Ein Künstlername, vorhandenes Logo, gelieferte Texte, eine Farbwelt und eine Korrekturrunde. Ein vollständiges neues Design oder neues Logo gehört nicht dazu.</p><div class="artist-total"><span id="artistChoiceLabel">Paket zum Selbstanpassen</span><strong id="artistChoiceTotal">79,00 €</strong></div><button class="button primary" id="artistAddSelected">Paket für 79 € in den Warenkorb</button><a class="artist-brief" href="/anpassung.html?produkt=artist-launch-personalisierung">Fragen zur persönlichen Anpassung →</a></div></div>`;
+}
+
+export function mountArtistOffer(add) {
+  const option=document.getElementById('artistPersonal');
+  if(!option)return;
+  const button=document.getElementById('artistAddSelected');
+  option.addEventListener('change',()=>{
+    document.getElementById('artistChoiceLabel').textContent=option.checked?'Paket + persönliche Anpassung':'Paket zum Selbstanpassen';
+    document.getElementById('artistChoiceTotal').textContent=option.checked?'178,00 €':'79,00 €';
+    button.textContent=option.checked?'Paket + Anpassung für 178 € in den Warenkorb':'Paket für 79 € in den Warenkorb';
+  });
+  button.addEventListener('click',()=>{add('artist-launch');if(option.checked)add('artist-launch-personalisierung');});
+}

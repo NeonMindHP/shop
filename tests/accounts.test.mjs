@@ -1,6 +1,8 @@
 import test from 'node:test';import assert from 'node:assert/strict';import {DatabaseSync} from 'node:sqlite';import {readFileSync} from 'node:fs';import worker from '../worker/index.mjs';import {hashPassword,verifyPassword} from '../worker/auth.mjs';
+import {defaults} from '../dist/design-engine.js';
+test('design order persists the draft, returns it only to its owner and records an actionable mailbox message',async()=>{const f=fixture();try{const p={id:'designstudio',name:'Designstudio',price:7900,category:'Designstudio',image:'assets/flow.png',description:'Test design package',contents:'Offline studio',formats:'HTML'};f.sqlite.prepare('INSERT INTO shop_products VALUES(?,?,?,?,?)').run(p.id,JSON.stringify(p),1,1,1);assert.equal((await f.request('/api/orders/demo',{items:[p.id],purchaseMode:'guest',result:'success'})).status,400);const result=await f.request('/api/orders/demo',{items:[p.id],purchaseMode:'guest',result:'success',design:defaults()});assert.equal(result.status,201);assert.equal(f.sqlite.prepare('SELECT design FROM customer_order_designs').get().design,JSON.stringify(result.data.order.design));const owned=await f.request('/api/guest/order',{key:result.data.guestKey});assert.equal(owned.data.order.design.category,'radio');assert.equal((await f.request('/api/guest/order',{key:'a'.repeat(64)})).status,404);const message=f.sqlite.prepare("SELECT body FROM shop_messages WHERE id=?").get('order:'+result.data.order.id);assert.match(message.body,/Designentwurf \(JSON\)/);assert.equal((await f.request('/api/admin/mailbox')).status,403);}finally{f.close()}});
 test('public galleries expose thumbnails while administrator packages stay private',async()=>{const f=fixture();try{const zip=new Uint8Array([80,75,3,4,0,0]),thumbnail=new Uint8Array([255,216,255]);f.env.PRODUCT_FILES={get:async key=>key==='private.zip'?{body:zip}:key==='preview.jpg'?{body:thumbnail}:null};f.sqlite.prepare('INSERT INTO product_files VALUES(?,?,?,?,?)').run('aurora','private.zip','Aurora.zip',6,1);f.sqlite.prepare('INSERT INTO product_gallery VALUES(?,?,?,?)').run('aurora',1,'preview.jpg','Polar Mirror');const gallery=await f.request('/api/gallery/aurora');assert.deepEqual(gallery.data,[{title:'Polar Mirror',image:'/api/gallery-image/aurora/1'}]);const image=await worker.fetch(new Request('https://shop.test/api/gallery-image/aurora/1'),f.env);assert.equal(image.status,200);assert.equal((await image.arrayBuffer()).byteLength,3);assert.equal((await f.request('/api/admin/package/aurora')).status,403);const reg=await f.request('/api/register',{email:'package-owner@example.com',password:'package-testing-password'});assert.equal((await f.request('/api/admin/package/aurora')).status,403);f.sqlite.prepare('INSERT INTO shop_admins VALUES(?)').run(reg.data.user.id);const packageResponse=await worker.fetch(new Request('https://shop.test/api/admin/package/aurora',{headers:{Cookie:f.cookie}}),f.env);assert.equal(packageResponse.status,200);assert.equal(packageResponse.headers.get('Cache-Control'),'private, no-store');assert.equal((await packageResponse.arrayBuffer()).byteLength,6);assert.equal((await f.request('/api/admin/package/aurora',undefined,'')).status,403);}finally{f.close()}});
-function fixture(){const sqlite=new DatabaseSync(':memory:');sqlite.exec(readFileSync(new URL('../migrations/0001_customer_accounts.sql',import.meta.url),'utf8'));sqlite.exec(readFileSync(new URL('../migrations/0002_product_management.sql',import.meta.url),'utf8'));sqlite.exec(readFileSync(new URL('../migrations/0003_product_previews.sql',import.meta.url),'utf8'));sqlite.exec(readFileSync(new URL('../migrations/0004_storefront_controls.sql',import.meta.url),'utf8'));sqlite.exec(readFileSync(new URL('../migrations/0005_product_galleries.sql',import.meta.url),'utf8'));sqlite.exec(readFileSync(new URL('../migrations/0006_product_trash.sql',import.meta.url),'utf8'));const wrap=(sql,args=[])=>({bind:(...values)=>wrap(sql,values),first:async()=>sqlite.prepare(sql).get(...args)||null,all:async()=>({results:sqlite.prepare(sql).all(...args)}),run:async()=>sqlite.prepare(sql).run(...args)});const db={prepare:sql=>wrap(sql),batch:async statements=>{sqlite.exec('BEGIN');try{const results=[];for(const statement of statements)results.push(await statement.run());sqlite.exec('COMMIT');return results}catch(e){sqlite.exec('ROLLBACK');throw e}}};const env={DB:db,AUTH_PEPPER:'independent-test-pepper-'.repeat(3),ASSETS:{fetch:()=>new Response('asset')}};let cookie='';const request=async(path,body,overrideCookie)=>{const req=new Request('https://shop.test'+path,{method:body?'POST':'GET',headers:{Origin:'https://shop.test','Content-Type':'application/json',Cookie:overrideCookie===undefined?cookie:overrideCookie,'CF-Connecting-IP':'192.0.2.1'},body:body?JSON.stringify(body):undefined});const response=await worker.fetch(req,env);if(response.headers.get('Set-Cookie'))cookie=response.headers.get('Set-Cookie').split(';')[0];return {status:response.status,data:await response.json()}};return {request,env,sqlite,get cookie(){return cookie},close:()=>sqlite.close()}}
+function fixture(){const sqlite=new DatabaseSync(':memory:');sqlite.exec(readFileSync(new URL('../migrations/0001_customer_accounts.sql',import.meta.url),'utf8'));sqlite.exec(readFileSync(new URL('../migrations/0002_product_management.sql',import.meta.url),'utf8'));sqlite.exec(readFileSync(new URL('../migrations/0003_product_previews.sql',import.meta.url),'utf8'));sqlite.exec(readFileSync(new URL('../migrations/0004_storefront_controls.sql',import.meta.url),'utf8'));sqlite.exec(readFileSync(new URL('../migrations/0005_product_galleries.sql',import.meta.url),'utf8'));sqlite.exec(readFileSync(new URL('../migrations/0006_product_trash.sql',import.meta.url),'utf8'));sqlite.exec(readFileSync(new URL('../migrations/0007_customization_inquiries.sql',import.meta.url),'utf8'));sqlite.exec(readFileSync(new URL('../migrations/0008_shop_core.sql',import.meta.url),'utf8'));sqlite.exec(readFileSync(new URL('../migrations/0009_order_designs.sql',import.meta.url),'utf8'));sqlite.exec(readFileSync(new URL('../migrations/0010_payments.sql',import.meta.url),'utf8'));const wrap=(sql,args=[])=>({bind:(...values)=>wrap(sql,values),first:async()=>sqlite.prepare(sql).get(...args)||null,all:async()=>({results:sqlite.prepare(sql).all(...args)}),run:async()=>sqlite.prepare(sql).run(...args)});const db={prepare:sql=>wrap(sql),batch:async statements=>{sqlite.exec('BEGIN');try{const results=[];for(const statement of statements)results.push(await statement.run());sqlite.exec('COMMIT');return results}catch(e){sqlite.exec('ROLLBACK');throw e}}};const env={DEMO_CHECKOUT_ENABLED:'true',DB:db,AUTH_PEPPER:'independent-test-pepper-'.repeat(3),ASSETS:{fetch:()=>new Response('asset')}};let cookie='';const request=async(path,body,overrideCookie)=>{const req=new Request('https://shop.test'+path,{method:body?'POST':'GET',headers:{Origin:'https://shop.test','Content-Type':'application/json',Cookie:overrideCookie===undefined?cookie:overrideCookie,'CF-Connecting-IP':'192.0.2.1'},body:body?JSON.stringify(body):undefined});const response=await worker.fetch(req,env);if(response.headers.get('Set-Cookie'))cookie=response.headers.get('Set-Cookie').split(';')[0];return {status:response.status,data:await response.json()}};return {request,env,sqlite,get cookie(){return cookie},close:()=>sqlite.close()}}
 test('password hashes are salted and need correct password and server pepper',async()=>{const p='test-password-long';const a=await hashPassword(p,'x'.repeat(40)),b=await hashPassword(p,'x'.repeat(40));assert.notEqual(a,b);assert.equal(await verifyPassword(p,a,'x'.repeat(40)),true);assert.equal(await verifyPassword('incorrect-password',a,'x'.repeat(40)),false);assert.equal(await verifyPassword(p,a,'y'.repeat(40)),false)});
 test('register, logout and login restore account; no plaintext password; session is isolated',async()=>{const f=fixture();try{const reg=await f.request('/api/register',{email:'Buyer@Example.com',password:'long-password-for-testing'});assert.equal(reg.status,200);assert.equal(reg.data.user.email,'buyer@example.com');assert.ok(f.cookie.startsWith('nm_session='));assert.equal((await f.request('/api/me')).data.user.email,'buyer@example.com');assert.notEqual(f.sqlite.prepare('SELECT password_hash FROM customers').get().password_hash,'long-password-for-testing');const oldCookie=f.cookie;await f.request('/api/logout',{});assert.equal((await f.request('/api/me',undefined,oldCookie)).data.user,null);assert.equal((await f.request('/api/login',{email:'buyer@example.com',password:'wrong-password-long'})).status,401);assert.equal((await f.request('/api/login',{email:'buyer@example.com',password:'long-password-for-testing'})).status,200);assert.equal((await f.request('/api/me',undefined,'')).data.user,null)}finally{f.close()}});
 test('guest keys grant only their order; claiming needs the key and links purchase to account',async()=>{const f=fixture();try{const receipt=await f.request('/api/orders/demo',{items:['aurora','flow'],purchaseMode:'guest',result:'success'});assert.equal(receipt.status,201);assert.equal(receipt.data.order.amount,1780);const key=receipt.data.guestKey;assert.equal((await f.request('/api/guest/order',{key:'0'.repeat(64)})).status,404);assert.equal((await f.request('/api/guest/order',{key})).data.order.items.length,2);assert.equal((await f.request('/api/guest/claim',{key})).status,401);await f.request('/api/register',{email:'owner@example.com',password:'long-password-for-testing'});assert.equal((await f.request('/api/guest/claim',{key})).status,200);assert.equal((await f.request('/api/orders')).data.orders.length,1);assert.equal((await f.request('/api/guest/order',{key},'')).status,404);await f.request('/api/logout',{});await f.request('/api/register',{email:'other@example.com',password:'another-long-password'});assert.equal((await f.request('/api/orders')).data.orders.length,0);assert.equal((await f.request('/api/guest/claim',{key})).status,404)}finally{f.close()}});
@@ -27,45 +29,69 @@ test('product trash hides baseline and custom products, restores drafts and pres
  const cross=await worker.fetch(new Request('https://shop.test/api/admin/product-trash',{method:'POST',headers:{Origin:'https://evil.test',Cookie:f.cookie,'Content-Type':'application/json'},body:JSON.stringify({id:'aurora',action:'delete'})}),f.env);assert.equal(cross.status,403);
  }finally{f.close()}});
 
-// Test grants use independent random tokens; the owner's recovery secret is
-// never stored in this repository or used by tests.
-import {recoverAdmin} from '../worker/index.mjs';
-import {digest,randomToken} from '../worker/auth.mjs';
-test('owner recovery resets only the single existing admin, invalidates sessions and cannot be replayed',async()=>{
- const f=fixture();try{
-  const admin=await f.request('/api/register',{email:'recover-admin@example.com',password:'old-admin-password'});
-  f.sqlite.prepare('INSERT INTO shop_admins VALUES(?)').run(admin.data.user.id);const oldCookie=f.cookie;
-  await f.request('/api/register',{email:'customer@example.com',password:'untouched-customer-password'});
-  const customerHash=f.sqlite.prepare('SELECT password_hash FROM customers WHERE email=?').get('customer@example.com').password_hash;
-  const token=randomToken(),grant={tokenHash:await digest(token),expiresAt:Date.now()+60000};
-  const reset=(secret=token,password='replacement-admin-password',config=grant)=>recoverAdmin(new Request('https://shop.test/api/admin-recovery',{method:'POST',body:JSON.stringify({token:secret,password})}),f.env,config);
-  assert.equal((await reset('0'.repeat(64))).status,403);
-  assert.equal((await reset(token,'short')).status,400);
-  assert.equal((await reset(token,'replacement-admin-password',{...grant,expiresAt:0})).status,403);
-  const result=await reset();assert.equal(result.status,200);assert.equal((await result.json()).email,'recover-admin@example.com');
-  assert.equal((await f.request('/api/me',undefined,oldCookie)).data.user,null);
-  assert.equal((await reset()).status,410);
-  assert.equal(f.sqlite.prepare('SELECT password_hash FROM customers WHERE email=?').get('customer@example.com').password_hash,customerHash);
-  assert.equal((await f.request('/api/login',{email:'recover-admin@example.com',password:'old-admin-password'})).status,401);
-  assert.equal((await f.request('/api/login',{email:'recover-admin@example.com',password:'replacement-admin-password'})).status,200);
-  assert.equal((await f.request('/api/admin/state')).status,200);
- }finally{f.close()}
-});
-test('recovery refuses missing or ambiguous administrators and parallel token use',async()=>{
- const f=fixture();try{
-  const token=randomToken(),grant={tokenHash:await digest(token),expiresAt:Date.now()+60000};
-  const reset=()=>recoverAdmin(new Request('https://shop.test/api/admin-recovery',{method:'POST',body:JSON.stringify({token,password:'replacement-admin-password'})}),f.env,grant);
-  assert.equal((await reset()).status,409);
-  const a=await f.request('/api/register',{email:'first@example.com',password:'first-admin-password'}),b=await f.request('/api/register',{email:'second@example.com',password:'second-admin-password'});
-  f.sqlite.prepare('INSERT INTO shop_admins VALUES(?)').run(a.data.user.id);f.sqlite.prepare('INSERT INTO shop_admins VALUES(?)').run(b.data.user.id);
-  assert.equal((await reset()).status,409);
-  f.sqlite.prepare('DELETE FROM shop_admins WHERE customer_id=?').run(b.data.user.id);
-  const results=await Promise.all([reset(),reset()]);assert.deepEqual(results.map(r=>r.status).sort(),[200,410]);
- }finally{f.close()}
-});
-test('recovery route checks origin and serves a non-cached page with no third-party resources',async()=>{
- const f=fixture();try{
-  const blocked=await worker.fetch(new Request('https://shop.test/api/admin-recovery',{method:'POST',headers:{Origin:'https://evil.test','Content-Type':'application/json'},body:'{}'}),f.env);assert.equal(blocked.status,403);
-  const page=await worker.fetch(new Request('https://shop.test/api/admin-recovery'),f.env);assert.equal(page.status,200);assert.equal(page.headers.get('Cache-Control'),'no-store');assert.equal(page.headers.get('Referrer-Policy'),'no-referrer');assert.match(page.headers.get('Content-Security-Policy'),/frame-ancestors 'none'/);assert.match(await page.text(),/history.replaceState/);
- }finally{f.close()}
+test('customization inquiry validates consent, keeps private data admin-only and expires old entries',async()=>{const f=fixture();try{
+ const data={name:'QA Customer',email:'qa@example.com',product:'Overdrive',system:'Joomla test version',message:'This is a sufficiently long customization request.',consent:true};
+ assert.equal((await f.request('/api/inquiries',{...data,consent:false})).status,400);
+ assert.equal((await f.request('/api/inquiries',{...data,message:'short'})).status,400);
+ assert.equal((await f.request('/api/inquiries',{...data,website:'spam.example'})).status,400);
+ assert.equal((await f.request('/api/inquiries',{...data,email:'not-email'})).status,400);
+ f.sqlite.prepare('INSERT INTO customization_inquiries VALUES(?,?,?,?,?,?,?)').run('old','old','old@example.com','Overdrive','HTML','old request',Date.now()-91*86400000);
+ const result=await f.request('/api/inquiries',data);assert.equal(result.status,201);assert.ok(result.data.id);
+ assert.equal(f.sqlite.prepare('SELECT count(*) AS n FROM customization_inquiries').get().n,1);
+ assert.equal((await f.request('/api/admin/inquiries')).status,403);
+ const account=await f.request('/api/register',{email:'inquiry-admin@example.com',password:'inquiry-test-password-long'});
+ assert.equal((await f.request('/api/admin/inquiries')).status,403);
+ f.sqlite.prepare('INSERT INTO shop_admins VALUES(?)').run(account.data.user.id);
+ const inbox=await f.request('/api/admin/inquiries');assert.equal(inbox.status,200);assert.equal(inbox.data.inquiries[0].email,data.email);
+ const cross=await worker.fetch(new Request('https://shop.test/api/inquiries',{method:'POST',headers:{Origin:'https://evil.test','Content-Type':'application/json'},body:JSON.stringify(data)}),f.env);assert.equal(cross.status,403);
+ for(let i=0;i<9;i++)assert.equal((await f.request('/api/inquiries',data)).status,201);
+ assert.equal((await f.request('/api/inquiries',data)).status,429);
+ }finally{f.close()}});
+
+test('shop core keeps mailbox private and supports read, save and reversible trash',async()=>{const f=fixture();try{
+ const msg={name:'Example',email:'person@example.com',subject:'Kontakt-Test',message:'Dies ist eine ausreichend lange Kontakt-Nachricht.',consent:true};
+ assert.equal((await f.request('/api/contact',{...msg,consent:false})).status,400);const contact=await f.request('/api/contact',msg);assert.equal(contact.status,201);
+ assert.equal((await f.request('/api/admin/mailbox')).status,403);const reg=await f.request('/api/register',{email:'owner-core@example.com',password:'owner-core-password'});f.sqlite.prepare('INSERT INTO shop_admins VALUES(?)').run(reg.data.user.id);
+ assert.equal((await f.request('/api/admin/core')).data.unread,1);const rows=(await f.request('/api/admin/mailbox')).data.messages;assert.equal(rows[0].kind,'contact');const id=rows[0].id;
+ for(const action of ['read','save','trash','restore','unread'])assert.equal((await f.request('/api/admin/mailbox',{id,action})).status,200);
+ assert.equal((await f.request('/api/admin/core')).data.unread,1);assert.equal((await f.request('/api/admin/mailbox',{id,action:'purge'})).status,400);
+ assert.equal(f.sqlite.prepare('SELECT count(*) n FROM shop_notifications').get().n,1);
+ }finally{f.close()}});
+test('maintenance is enforced on root, nested pages, HTML and public catalog while admin and legal access remain',async()=>{const f=fixture();try{
+ const reg=await f.request('/api/register',{email:'maintenance-owner@example.com',password:'maintenance-password'});f.sqlite.prepare('INSERT INTO shop_admins VALUES(?)').run(reg.data.user.id);
+ assert.equal((await f.request('/api/admin/maintenance',{enabled:true,info:'Kurze Wartung',status:'Shop | in Arbeit'})).status,200);
+ for(const path of ['/','/index.html','/collections','/demos/overdrive/index.html']){const response=await worker.fetch(new Request('https://shop.test'+path),f.env);assert.equal(response.status,503);assert.equal(response.headers.get('Cache-Control'),'no-store');}
+ assert.equal((await f.request('/api/products',undefined,'')).status,503);assert.equal((await worker.fetch(new Request('https://shop.test/impressum'),f.env)).status,200);
+ assert.equal((await worker.fetch(new Request('https://shop.test/admin'),f.env)).status,200);assert.equal((await worker.fetch(new Request('https://shop.test/',{headers:{Cookie:f.cookie}}),f.env)).status,200);
+ assert.equal((await f.request('/api/admin/maintenance',{enabled:false,info:'',status:''})).status,200);
+ }finally{f.close()}});
+test('user blocking revokes sessions and prevents login without changing orders or blocking administrators',async()=>{const f=fixture();try{
+ const customer=await f.request('/api/register',{email:'customer-core@example.com',password:'customer-core-password'}),cookie=f.cookie;
+ const owner=await f.request('/api/register',{email:'owner-user@example.com',password:'owner-user-password'});f.sqlite.prepare('INSERT INTO shop_admins VALUES(?)').run(owner.data.user.id);
+ assert.equal((await f.request('/api/admin/users',{id:owner.data.user.id,blocked:true})).status,409);
+ assert.equal((await f.request('/api/admin/users',{id:customer.data.user.id,blocked:true})).status,200);
+ assert.equal((await f.request('/api/me',undefined,cookie)).data.user,null);assert.equal((await f.request('/api/login',{email:'customer-core@example.com',password:'customer-core-password'})).status,403);
+ assert.equal((await f.request('/api/admin/users',{id:customer.data.user.id,blocked:false})).status,200);
+ assert.equal((await f.request('/api/admin/users')).data.users.length,2);
+ }finally{f.close()}});
+test('notification password is encrypted, never returned, delivery is retryable and test orders are labelled',async()=>{const f=fixture();try{
+ const owner=await f.request('/api/register',{email:'mail-owner@example.com',password:'mail-owner-password'});f.sqlite.prepare('INSERT INTO shop_admins VALUES(?)').run(owner.data.user.id);
+ assert.equal((await f.request('/api/admin/mail-settings',{provider:'other',user:'sender@example.com',password:'test-secret'})).status,400);
+ assert.equal((await f.request('/api/admin/mail-settings',{provider:'gmx',user:'sender@example.com',password:'test-secret'})).status,200);
+ assert.equal(f.sqlite.prepare("SELECT value FROM shop_settings WHERE key='smtp'").get().value.includes('test-secret'),false);
+ assert.equal(JSON.stringify((await f.request('/api/admin/core')).data).includes('test-secret'),false);
+ await f.request('/api/orders/demo',{items:['aurora'],purchaseMode:'guest',result:'success'});assert.equal(f.sqlite.prepare('SELECT kind FROM shop_messages').get().kind,'demo');
+ f.env.TEST_SEND_MAIL=()=>{throw Error('failure')};await f.request('/api/admin/mail-retry',{});assert.equal(f.sqlite.prepare('SELECT state FROM shop_notifications').get().state,'pending');
+ f.sqlite.prepare('UPDATE shop_notifications SET next_at=0').run();let sent=0;f.env.TEST_SEND_MAIL=v=>{assert.equal(v.to,'info@neonmind-ai.com');assert.equal(v.kind,'demo');sent++};
+ await f.request('/api/admin/mail-retry',{});await f.request('/api/admin/mail-retry',{});assert.equal(sent,1);assert.equal(f.sqlite.prepare('SELECT state FROM shop_notifications').get().state,'sent');
+ }finally{f.close()}});
+test('confirmed payment produces exactly one distinct paid message and queue entry',async()=>{const f=fixture();try{
+ const receipt=await f.request('/api/orders/demo',{items:['aurora'],purchaseMode:'guest',result:'success'});const id=receipt.data.order.id;
+ f.sqlite.prepare("UPDATE customer_orders SET status='paid' WHERE id=?").run(id);f.sqlite.prepare("UPDATE customer_orders SET status='paid' WHERE id=?").run(id);
+ assert.equal(f.sqlite.prepare("SELECT count(*) n FROM shop_messages WHERE kind='purchase'").get().n,1);assert.equal(f.sqlite.prepare("SELECT count(*) n FROM shop_notifications WHERE message_id=?").get('paid:'+id).n,1);
+ }finally{f.close()}});
+
+test('SMTP sends credentials only after TLS and the notice contains no customer contents',async()=>{const {sendNotice,seal}=await import('../worker/mail.mjs');const env={AUTH_PEPPER:'test-pepper-'.repeat(6)};const stored=await seal({provider:'gmx',user:'owner@gmx.de',password:'app-password'},env);env.DB={prepare:()=>({first:async()=>({value:stored})})};let secure=false,raw='',commands=[],closed=false;
+ function socket(tls){let stream;const encoder=new TextEncoder();const readable=new ReadableStream({start(c){stream=c;if(!tls)c.enqueue(encoder.encode('220 SMTP ready\r\n'));}});const writable=new WritableStream({write(bytes){const line=new TextDecoder().decode(bytes);commands.push(line);let response='250 OK\r\n';if(line.startsWith('EHLO'))response=tls?'250-AUTH LOGIN\r\n250 OK\r\n':'250-STARTTLS\r\n250 OK\r\n';if(line.startsWith('STARTTLS'))response='220 Begin TLS\r\n';if(line.startsWith('AUTH LOGIN')){assert.equal(secure,true);response='334 Username\r\n';}if(line.trim()===btoa('owner@gmx.de'))response='334 Password\r\n';if(line.startsWith('DATA'))response='354 Send data\r\n';if(line.startsWith('From:'))raw=line;if(line.startsWith('QUIT'))response='221 Bye\r\n';stream.enqueue(encoder.encode(response));}});return {readable,writable,startTls(){secure=true;return socket(true)},async close(){closed=true}};}
+ env.TEST_CONNECT=(address,options)=>{assert.equal(address.hostname,'mail.gmx.net');assert.equal(address.port,587);assert.equal(options.secureTransport,'starttls');return socket(false)};await sendNotice(env,'wish');assert.ok(closed);assert.ok(commands.some(x=>x.startsWith('AUTH LOGIN')));assert.ok(raw.includes('To: info@neonmind-ai.com'));const decoded=Buffer.from(raw.split('\r\n\r\n')[1].split('\r\n.')[0].replace(/\r\n/g,''),'base64').toString();assert.ok(decoded.includes('Neue Wunschanfrage'));assert.ok(decoded.includes('keine Kundendaten'));
 });

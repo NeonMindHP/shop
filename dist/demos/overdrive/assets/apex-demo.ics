@@ -1,0 +1,13 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//NeonMind//Overdrive Demo//DE
+BEGIN:VEVENT
+UID:overdrive-apex-demo-20261121@neonmind.example
+DTSTAMP:20261007T120000Z
+DTSTART:20261121T170000Z
+DTEND:20261121T200000Z
+SUMMARY:DEMO - Overdrive Apex Championship
+DESCRIPTION:Fiktiver Termin des Overdrive Website-Testprojekts. Kein echtes Event.
+STATUS:TENTATIVE
+END:VEVENT
+END:VCALENDAR

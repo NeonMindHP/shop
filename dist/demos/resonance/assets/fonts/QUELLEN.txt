@@ -1,0 +1,6 @@
+Manrope, Cormorant Garamond und Barlow Condensed aus google/fonts. SIL Open Font License liegt je Familie bei.
+https://raw.githubusercontent.com/google/fonts/main/ofl/barlowcondensed/BarlowCondensed-Black.ttf
+https://raw.githubusercontent.com/google/fonts/main/ofl/manrope/Manrope%5Bwght%5D.ttf
+https://raw.githubusercontent.com/google/fonts/main/ofl/manrope/OFL.txt
+https://raw.githubusercontent.com/google/fonts/main/ofl/cormorantgaramond/CormorantGaramond%5Bwght%5D.ttf
+https://raw.githubusercontent.com/google/fonts/main/ofl/cormorantgaramond/OFL.txt

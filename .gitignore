@@ -11,3 +11,7 @@ private/
 outputs/
 .venv/
 __pycache__/
+
+# Local database exports and recovery backups must stay private.
+.private/
+Private-Sicherung/

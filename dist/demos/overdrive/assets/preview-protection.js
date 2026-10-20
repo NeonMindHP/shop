@@ -1,0 +1,1 @@
+(()=>{const protectedImage=e=>e.target instanceof Element&&(e.target.closest('img,.hero-art,.tournament-hero')||getComputedStyle(e.target).backgroundImage!=='none');document.addEventListener('contextmenu',e=>{if(protectedImage(e))e.preventDefault();});document.addEventListener('dragstart',e=>{if(protectedImage(e))e.preventDefault();});})();
