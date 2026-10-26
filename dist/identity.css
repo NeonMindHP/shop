@@ -35,3 +35,32 @@
 .studio-shell>header a{color:var(--ink)}
 .studio-shell>header .main-site-link{color:var(--cyan)}
 .shelf-track{padding-bottom:2px}.category-shelf+.category-shelf .neon-divider{margin-top:0}
+
+/* Shared page outline: reference entdecken_header/footer, 26.10.2026. */
+.shell>header{justify-content:flex-start;gap:14px}
+.shell>header nav{margin-left:auto;margin-right:auto}
+.shell>header #cartButton{margin-left:0;margin-right:0}
+.shell>header .shop-menu{flex:0 0 auto}
+.shop-page-frame{display:contents}
+.shop-page-frame.is-framed{display:flex;flex-direction:column;min-height:calc(100svh - 120px);border:1px solid #aa45f077;border-top-color:#19e7ff66;border-radius:18px;background:linear-gradient(125deg,#061323f2,#020811f5);box-shadow:0 0 25px #914dff0b}
+.shop-page-frame.is-framed>main{flex:1;min-height:0;min-width:0}
+.shop-page-frame.is-framed>.shop-footer{flex-shrink:0;border:0;border-radius:0 0 18px 18px;background:transparent;margin-top:0}
+.shop-page-frame.is-framed>main>.page{padding:28px 30px 30px}
+.shop-page-frame[data-page=collections]>main>.page{padding:0}
+.shop-page-frame[data-page=collections] .collections{margin:0;border:0;border-radius:0;background:transparent;box-shadow:none;padding:30px}
+.shop-page-frame[data-page=wuensche] .wishes-integrated{border:0;border-radius:0;background:transparent;padding:0 26px 28px}
+.shop-page-frame[data-page=wuensche] .wishes-intro{padding-top:32px}
+.shop-page-frame[data-page=checkout] .page{max-width:1240px;margin:0 auto}
+.studio-shell .shop-page-frame>main{width:100%;max-width:none;margin:0;padding:26px 16px 30px}
+.collection-back{margin-bottom:18px}
+@media(max-width:1150px){.shell>header nav{margin:0}.shell>header #cartButton{margin-left:auto}}
+@media(max-width:640px){
+ .shell>header{gap:10px}
+ .shop-page-frame.is-framed{min-height:calc(100svh - 170px);border-radius:16px}
+ .shop-page-frame.is-framed>main>.page{padding:22px 15px}
+ .shop-page-frame[data-page=collections]>main>.page{padding:0}
+ .shop-page-frame[data-page=collections] .collections{padding:22px 15px}
+ .shop-page-frame[data-page=wuensche] .wishes-integrated{padding:0 12px 24px}
+ .shop-page-frame[data-page=wuensche] .wishes-intro{padding:28px 12px}
+ .studio-shell .shop-page-frame>main{padding:24px 12px}
+}
