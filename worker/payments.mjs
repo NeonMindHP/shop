@@ -1,8 +1,18 @@
+import {customerMailStatement,unseal,validMailbox} from './mail.mjs';
 import {catalog} from './admin.mjs';
 import {isAdmin,maintenance} from './core.mjs';
-import {randomToken,digest,normalizeEmail,validEmail} from './auth.mjs';
+import {randomToken,digest,normalizeEmail} from './auth.mjs';
 import {validateDesign} from './design.mjs';
 const json=(data,status=200)=>new Response(JSON.stringify(data),{status,headers:{'Content-Type':'application/json','Cache-Control':'no-store'}});
+async function mailOrderPayload(env,order,selected=null){
+ if(!selected){
+  const previous=await env.DB.prepare('SELECT payload FROM shop_customer_mail WHERE id=?').bind('order:'+order.id).first();
+  if(previous)return unseal(previous.payload,env);
+  const catalogItems=await catalog(env.DB),items=(await env.DB.prepare('SELECT product_id,price FROM customer_order_items WHERE order_id=?').bind(order.id).all()).results;
+  selected=items.map(i=>({id:i.product_id,name:catalogItems.find(p=>p.id===i.product_id)?.name||i.product_id,price:i.price,category:catalogItems.find(p=>p.id===i.product_id)?.category}));
+ }
+ return {reference:order.id,amount:order.amount,purchaseMode:order.customer_id?'account':'guest',items:selected.map(p=>({name:p.name,price:p.price,service:p.category==='Designservice'}))};
+}
 export async function paymentState(env){
  const row=await env.DB?.prepare("SELECT value FROM shop_settings WHERE key='payments'").first();
  const enabled=row?JSON.parse(row.value).enabled===true:false;
@@ -38,6 +48,7 @@ export async function stripeWebhook(request,env){
   if(object.payment_status==='paid'){
    statements.push(db.prepare('UPDATE shop_payments SET payment_intent=? WHERE order_id=?').bind(object.payment_intent,order.id),db.prepare("UPDATE customer_orders SET status=coalesce((SELECT status FROM shop_payment_revocations WHERE payment_intent=? AND mode=?),?) WHERE id=? AND status='pending'").bind(object.payment_intent,payment.mode,test?'test_paid':'paid',order.id));
    if(order.status==='pending')statements.push(db.prepare("UPDATE shop_messages SET email=?,body=body || char(10) || 'Produkte: ' || coalesce((SELECT group_concat(product_id, ', ') FROM customer_order_items WHERE order_id=?),'') || char(10) || coalesce((SELECT 'Designentwurf (JSON):' || char(10) || design FROM customer_order_designs WHERE order_id=?),'') WHERE id=?").bind(payment.email,order.id,order.id,'paid:'+order.id));
+   if(order.status==='pending'&&!test)statements.push(await customerMailStatement(env,{id:'payment:'+order.id,kind:'payment',to:payment.email,payload:await mailOrderPayload(env,order)},order.id));
   }
  }else if(['charge.refunded','charge.dispute.created'].includes(event.type)){
   const intent=typeof object.payment_intent==='string'?object.payment_intent:object.payment_intent?.id;
@@ -72,7 +83,7 @@ export async function checkoutApi(request,env,user){
  if(!Array.isArray(b.items)||!b.items.length||b.items.length>50||new Set(b.items).size!==b.items.length)return json({error:'Ungültiger Warenkorb.'},400);
  if(!testing&&b.consent!==true)return json({error:'Bitte die Hinweise zur digitalen Lieferung bestätigen.'},400);
  if(!['guest','account'].includes(b.purchaseMode)||b.purchaseMode==='account'&&!user)return json({error:'Bitte anmelden oder Gastkauf wählen.'},401);
- const email=normalizeEmail(user?.email||b.email);if(!validEmail(email))return json({error:'Bitte eine gültige E-Mail-Adresse eingeben.'},400);
+ const email=normalizeEmail(user?.email||b.email);if(!validMailbox(email))return json({error:'Bitte eine gültige E-Mail-Adresse eingeben.'},400);
  const current=await catalog(db),selected=b.items.map(id=>current.find(p=>p.id===id));
  if(selected.some(p=>!p||!Number.isSafeInteger(p.price)||p.price<=0))return json({error:'Ungültiges Produkt.'},400);
  if(selected.some(p=>p.category!=='Designservice'&&!p.packageReady))return json({error:'Ein Produktpaket ist noch nicht lieferbar.'},409);
@@ -89,5 +100,5 @@ export async function checkoutApi(request,env,user){
  if(testing&&!state.sandboxConfigured){await db.prepare("UPDATE customer_orders SET status='failed' WHERE id=?").bind(id).run();return json({error:'Stripe-Sandbox noch nicht eingerichtet.'},503)}
  const params=new URLSearchParams({mode:'payment',client_reference_id:id,customer_email:email,success_url:url.origin+(receipt.guestKey?'/guest':'/downloads'),cancel_url:url.origin+'/checkout','payment_method_types[0]':'card','payment_method_options[card][request_three_d_secure]':'automatic','metadata[order_id]':id,'payment_intent_data[metadata][order_id]':id});
  selected.forEach((p,i)=>{params.set(`line_items[${i}][price_data][currency]`,'eur');params.set(`line_items[${i}][price_data][unit_amount]`,String(p.price));params.set(`line_items[${i}][price_data][product_data][name]`,p.name);params.set(`line_items[${i}][quantity]`,'1')});
- try{const session=await stripe(env,key,'checkout/sessions',params,id);if(!/^https:\/\/checkout\.stripe\.com\//.test(session.url||'')||!/^cs_/.test(session.id||'')||session.livemode!==!testing)throw Error('INVALID_SESSION');await db.prepare('UPDATE shop_payments SET checkout_id=? WHERE order_id=?').bind(session.id,id).run();return json({...receipt,checkoutUrl:session.url},201)}catch{await db.prepare("UPDATE customer_orders SET status='failed' WHERE id=? AND status='pending'").bind(id).run();return json({error:'Der Zahlungsanbieter ist derzeit nicht erreichbar. Es wurde kein Download freigegeben.'},502)}
+ try{const session=await stripe(env,key,'checkout/sessions',params,id);if(!/^https:\/\/checkout\.stripe\.com\//.test(session.url||'')||!/^cs_/.test(session.id||'')||session.livemode!==!testing)throw Error('INVALID_SESSION');await db.batch([db.prepare('UPDATE shop_payments SET checkout_id=? WHERE order_id=?').bind(session.id,id),...(mode==='live'?[await customerMailStatement(env,{id:'order:'+id,kind:'order',to:email,payload:await mailOrderPayload(env,{id,amount,customer_id:b.purchaseMode==='account'?user.id:null},selected)})]:[])]);return json({...receipt,checkoutUrl:session.url},201)}catch{await db.prepare("UPDATE customer_orders SET status='failed' WHERE id=? AND status='pending'").bind(id).run();return json({error:'Der Zahlungsanbieter ist derzeit nicht erreichbar. Es wurde kein Download freigegeben.'},502)}
 }

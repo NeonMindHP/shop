@@ -1,7 +1,7 @@
 import {paymentState,checkoutApi,stripeWebhook} from './payments.mjs';
 import {validateDesign} from './design.mjs';
 import {coreApi,maintenance,isAdmin} from './core.mjs';
-import {queueMessage,flushNotifications} from './mail.mjs';
+import {queueMessage,flushNotifications,validMailbox} from './mail.mjs';
 import {adminApi, catalog, storefront} from './admin.mjs';
 import {products} from '../dist/catalog.js';
 import {randomToken,digest,hashPassword,verifyPassword,normalizeEmail,validEmail,validPassword} from './auth.mjs';
@@ -31,7 +31,7 @@ export default {async fetch(request,env,ctx){const url=new URL(request.url);cons
  if(['/api/inquiries','/api/contact'].includes(url.pathname)&&request.method==='POST'){
   const b=await input(request);const clean=(v,max)=>typeof v==='string'?v.trim().slice(0,max+1):'';
   const name=clean(b.name,100),email=normalizeEmail(clean(b.email,180)),product=clean(url.pathname==='/api/contact'?(b.subject||'Kontakt'):b.product,120),system=clean(url.pathname==='/api/contact'?'Kontakt':b.system,180),message=clean(b.message,3000);
-  if(b.website||b.consent!==true||name.length<2||name.length>100||!validEmail(email)||email.length>180||!product||product.length>120||!system||system.length>180||message.length<20||message.length>3000)return json({error:'Bitte alle Pflichtfelder und die Datenschutzhinweise prüfen.'},400);
+  if(b.website||b.consent!==true||name.length<2||name.length>100||!validMailbox(email)||email.length>180||!product||product.length>120||!system||system.length>180||message.length<20||message.length>3000)return json({error:'Bitte alle Pflichtfelder und die Datenschutzhinweise prüfen.'},400);
   if(await limited(request,db,'inquiry'))return json({error:'Zu viele Anfragen. Bitte später erneut versuchen.'},429);
   const id=crypto.randomUUID(),now=Date.now();
   await db.batch([db.prepare('DELETE FROM customization_inquiries WHERE created_at<?').bind(now-90*86400000),db.prepare('INSERT INTO customization_inquiries VALUES(?,?,?,?,?,?,?)').bind(id,name,email,product,system,message,now)]);
@@ -39,7 +39,7 @@ export default {async fetch(request,env,ctx){const url=new URL(request.url);cons
   return json({ok:true,id},201);
  }
  const user=await session(request,db);
- if(['/api/checkout','/api/admin/payments','/api/admin/test-order','/api/admin/payment-audit'].includes(url.pathname)){if(request.method==='POST'&&await limited(request,db,'checkout'))return json({error:'Zu viele Bestellversuche.'},429);return checkoutApi(request,env,user);}
+ if(['/api/checkout','/api/admin/payments','/api/admin/test-order','/api/admin/payment-audit'].includes(url.pathname)){if(request.method==='POST'&&await limited(request,db,'checkout'))return json({error:'Zu viele Bestellversuche.'},429);const result=await checkoutApi(request,env,user);if(result.ok&&ctx&&url.pathname==='/api/checkout')ctx.waitUntil(flushNotifications(env).catch(()=>{}));return result;}
  if(maintenanceState.enabled&&url.pathname==='/api/orders/demo'&&!await isAdmin(env,user))return json({error:'Der Shop ist vorübergehend im Wartungsmodus.'},503);
  if(/^\/api\/admin\/(core|mailbox|maintenance|users|mail-settings|mail-test|mail-retry)$/.test(url.pathname))return coreApi(request,env,user);
  if(url.pathname.startsWith('/api/admin/'))return adminApi(request,env,user);
