@@ -64,3 +64,15 @@
  .shop-page-frame[data-page=wuensche] .wishes-intro{padding:28px 12px}
  .studio-shell .shop-page-frame>main{padding:24px 12px}
 }
+
+/* Final page-frame details: product previews and purchase library. */
+.shop-page-frame[data-page=downloads]{min-height:0}
+.shop-page-frame[data-page=downloads]>main>.page{width:min(1100px,100%);margin:0 auto;padding:24px}
+.shop-page-frame[data-page=downloads]>main>.page>.panel{padding:24px}
+.shop-page-frame[data-page=downloads] .empty{padding:30px 16px}
+.shop-page-frame[data-page=downloads] h1{font-size:clamp(27px,3vw,36px)!important;line-height:1.2;margin-bottom:16px}
+@media(max-width:640px){
+ .shop-page-frame[data-page=downloads]>main>.page{padding:18px 14px}
+ .shop-page-frame[data-page=downloads]>main>.page>.panel{padding:20px 16px}
+ .shop-page-frame[data-page=downloads] .empty{padding:24px 8px}
+}
