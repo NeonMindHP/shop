@@ -13,6 +13,7 @@ async function mailOrderPayload(env,order,selected=null){
  }
  return {reference:order.id,amount:order.amount,purchaseMode:order.customer_id?'account':'guest',items:selected.map(p=>({name:p.name,price:p.price,service:p.category==='Designservice'}))};
 }
+export function secretStatus(value,prefix){return {present:typeof value==='string'&&value.length>0,formatValid:typeof value==='string'&&value.startsWith(prefix),outerWhitespace:typeof value==='string'&&value!==value.trim()};}
 export async function paymentState(env){
  const row=await env.DB?.prepare("SELECT value FROM shop_settings WHERE key='payments'").first();
  const enabled=row?JSON.parse(row.value).enabled===true:false;
@@ -69,7 +70,7 @@ export async function checkoutApi(request,env,user){
  }
  if(url.pathname==='/api/admin/payments'){
   if(!admin)return json({error:'Nur für Betreiber.'},403);
-  if(request.method==='GET')return json({...state,adminTestAvailable:true,webhook:'https://shop.neonmind-ai.com/api/payments/stripe/webhook',sandboxWebhook:'https://shop.neonmind-ai.com/api/payments/stripe/webhook/test'});
+  if(request.method==='GET')return json({...state,adminTestAvailable:true,configuration:{sandboxKey:secretStatus(env.STRIPE_TEST_SECRET_KEY,'sk_test_'),sandboxWebhook:secretStatus(env.STRIPE_TEST_WEBHOOK_SECRET,'whsec_')},webhook:'https://shop.neonmind-ai.com/api/payments/stripe/webhook',sandboxWebhook:'https://shop.neonmind-ai.com/api/payments/stripe/webhook/test'});
   const b=await request.json();if(typeof b.enabled!=='boolean')return json({error:'Ungültige Einstellung.'},400);
   if(b.enabled&&!state.liveConfigured)return json({error:'Live-Schlüssel und Webhook fehlen noch.'},409);
   if(b.enabled&&b.readinessConfirmed!==true)return json({error:'Bitte Betreiberangaben, Verkaufsbedingungen und Lieferablauf vor der Freischaltung bestätigen.'},400);
