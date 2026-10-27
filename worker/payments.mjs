@@ -70,7 +70,7 @@ export async function checkoutApi(request,env,user){
  }
  if(url.pathname==='/api/admin/payments'){
   if(!admin)return json({error:'Nur für Betreiber.'},403);
-  if(request.method==='GET')return json({...state,adminTestAvailable:true,configuration:{sandboxKey:secretStatus(env.STRIPE_TEST_SECRET_KEY,'sk_test_'),sandboxWebhook:secretStatus(env.STRIPE_TEST_WEBHOOK_SECRET,'whsec_')},webhook:'https://shop.neonmind-ai.com/api/payments/stripe/webhook',sandboxWebhook:'https://shop.neonmind-ai.com/api/payments/stripe/webhook/test'});
+  if(request.method==='GET')return json({...state,adminTestAvailable:true,configuration:{liveKey:secretStatus(env.STRIPE_SECRET_KEY,'sk_live_'),liveWebhook:secretStatus(env.STRIPE_WEBHOOK_SECRET,'whsec_'),sandboxKey:secretStatus(env.STRIPE_TEST_SECRET_KEY,'sk_test_'),sandboxWebhook:secretStatus(env.STRIPE_TEST_WEBHOOK_SECRET,'whsec_')},webhook:'https://shop.neonmind-ai.com/api/payments/stripe/webhook',sandboxWebhook:'https://shop.neonmind-ai.com/api/payments/stripe/webhook/test'});
   const b=await request.json();if(typeof b.enabled!=='boolean')return json({error:'Ungültige Einstellung.'},400);
   if(b.enabled&&!state.liveConfigured)return json({error:'Live-Schlüssel und Webhook fehlen noch.'},409);
   if(b.enabled&&b.readinessConfirmed!==true)return json({error:'Bitte Betreiberangaben, Verkaufsbedingungen und Lieferablauf vor der Freischaltung bestätigen.'},400);
