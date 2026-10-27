@@ -14,6 +14,14 @@ async function mailOrderPayload(env,order,selected=null){
  return {reference:order.id,amount:order.amount,purchaseMode:order.customer_id?'account':'guest',items:selected.map(p=>({name:p.name,price:p.price,service:p.category==='Designservice'}))};
 }
 export function secretStatus(value,prefix){return {present:typeof value==='string'&&value.length>0,formatValid:typeof value==='string'&&(value.startsWith(prefix)||(prefix.startsWith('sk_')&&value.startsWith('rk_'+prefix.slice(3)))),outerWhitespace:typeof value==='string'&&value!==value.trim()};}
+export async function verifyLiveConnection(env){
+ if(!secretStatus(env.STRIPE_SECRET_KEY,'sk_live_').formatValid)return {ok:false,status:'key_missing_or_invalid'};
+ try{
+  const response=await (env.TEST_STRIPE_FETCH||fetch)('https://api.stripe.com/v1/checkout/sessions?limit=1',{method:'GET',signal:AbortSignal.timeout(15000),headers:{Authorization:'Bearer '+env.STRIPE_SECRET_KEY}});
+  if(!response.ok)return {ok:false,status:response.status===401?'authentication_failed':response.status===403?'permission_denied':'stripe_unavailable'};
+  const data=await response.json();return data.object==='list'&&Array.isArray(data.data)?{ok:true,status:'connected'}:{ok:false,status:'unexpected_response'};
+ }catch{return {ok:false,status:'stripe_unavailable'}}
+}
 export async function paymentState(env){
  const row=await env.DB?.prepare("SELECT value FROM shop_settings WHERE key='payments'").first();
  const enabled=row?JSON.parse(row.value).enabled===true:false;
@@ -70,7 +78,7 @@ export async function checkoutApi(request,env,user){
  }
  if(url.pathname==='/api/admin/payments'){
   if(!admin)return json({error:'Nur für Betreiber.'},403);
-  if(request.method==='GET')return json({...state,adminTestAvailable:true,configuration:{liveKey:secretStatus(env.STRIPE_SECRET_KEY,'sk_live_'),liveWebhook:secretStatus(env.STRIPE_WEBHOOK_SECRET,'whsec_'),sandboxKey:secretStatus(env.STRIPE_TEST_SECRET_KEY,'sk_test_'),sandboxWebhook:secretStatus(env.STRIPE_TEST_WEBHOOK_SECRET,'whsec_')},webhook:'https://shop.neonmind-ai.com/api/payments/stripe/webhook',sandboxWebhook:'https://shop.neonmind-ai.com/api/payments/stripe/webhook/test'});
+  if(request.method==='GET')return json({...state,...(url.searchParams.get('verify')==='true'?{connection:await verifyLiveConnection(env)}:{}),adminTestAvailable:true,configuration:{liveKey:secretStatus(env.STRIPE_SECRET_KEY,'sk_live_'),liveWebhook:secretStatus(env.STRIPE_WEBHOOK_SECRET,'whsec_'),sandboxKey:secretStatus(env.STRIPE_TEST_SECRET_KEY,'sk_test_'),sandboxWebhook:secretStatus(env.STRIPE_TEST_WEBHOOK_SECRET,'whsec_')},webhook:'https://shop.neonmind-ai.com/api/payments/stripe/webhook',sandboxWebhook:'https://shop.neonmind-ai.com/api/payments/stripe/webhook/test'});
   const b=await request.json();if(typeof b.enabled!=='boolean')return json({error:'Ungültige Einstellung.'},400);
   if(b.enabled&&!state.liveConfigured)return json({error:'Live-Schlüssel und Webhook fehlen noch.'},409);
   if(b.enabled&&b.readinessConfirmed!==true)return json({error:'Bitte Betreiberangaben, Verkaufsbedingungen und Lieferablauf vor der Freischaltung bestätigen.'},400);
