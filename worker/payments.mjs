@@ -13,11 +13,11 @@ async function mailOrderPayload(env,order,selected=null){
  }
  return {reference:order.id,amount:order.amount,purchaseMode:order.customer_id?'account':'guest',items:selected.map(p=>({name:p.name,price:p.price,service:p.category==='Designservice'}))};
 }
-export function secretStatus(value,prefix){return {present:typeof value==='string'&&value.length>0,formatValid:typeof value==='string'&&value.startsWith(prefix),outerWhitespace:typeof value==='string'&&value!==value.trim()};}
+export function secretStatus(value,prefix){return {present:typeof value==='string'&&value.length>0,formatValid:typeof value==='string'&&(value.startsWith(prefix)||(prefix.startsWith('sk_')&&value.startsWith('rk_'+prefix.slice(3)))),outerWhitespace:typeof value==='string'&&value!==value.trim()};}
 export async function paymentState(env){
  const row=await env.DB?.prepare("SELECT value FROM shop_settings WHERE key='payments'").first();
  const enabled=row?JSON.parse(row.value).enabled===true:false;
- return {provider:'stripe',paymentsEnabled:enabled&&/^sk_live_/.test(env.STRIPE_SECRET_KEY||'')&&/^whsec_/.test(env.STRIPE_WEBHOOK_SECRET||''),liveConfigured:/^sk_live_/.test(env.STRIPE_SECRET_KEY||'')&&/^whsec_/.test(env.STRIPE_WEBHOOK_SECRET||''),sandboxConfigured:/^sk_test_/.test(env.STRIPE_TEST_SECRET_KEY||'')&&/^whsec_/.test(env.STRIPE_TEST_WEBHOOK_SECRET||''),enabled};
+ return {provider:'stripe',paymentsEnabled:enabled&&/^(?:sk|rk)_live_/.test(env.STRIPE_SECRET_KEY||'')&&/^whsec_/.test(env.STRIPE_WEBHOOK_SECRET||''),liveConfigured:/^(?:sk|rk)_live_/.test(env.STRIPE_SECRET_KEY||'')&&/^whsec_/.test(env.STRIPE_WEBHOOK_SECRET||''),sandboxConfigured:/^(?:sk|rk)_test_/.test(env.STRIPE_TEST_SECRET_KEY||'')&&/^whsec_/.test(env.STRIPE_TEST_WEBHOOK_SECRET||''),enabled};
 }
 export async function verifyStripeSignature(raw,header,secret,now=Date.now()){
  if(!secret||!header)return false;
