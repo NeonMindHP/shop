@@ -37,7 +37,7 @@ export async function customerMailStatement(env,{id,kind,to,payload,created_at=D
  const encrypted=await seal(payload,env);
  let condition='1=1',args=[id,kind,to,encrypted,created_at];
  if(paidOrder){condition="EXISTS(SELECT 1 FROM customer_orders o JOIN shop_payments p ON p.order_id=o.id WHERE o.id=? AND o.status='paid' AND p.mode='live')";args.push(paidOrder);}
- else if(kind==='inquiry'){condition="(SELECT count(*) FROM shop_customer_mail WHERE recipient=? AND kind='inquiry' AND created_at>?)<3";args.push(to,created_at-900000);}
+ else if(kind==='inquiry'&&payload.inquiryKind!=='withdrawal'){condition="(SELECT count(*) FROM shop_customer_mail WHERE recipient=? AND kind='inquiry' AND created_at>?)<3";args.push(to,created_at-900000);}
  return env.DB.prepare('INSERT OR IGNORE INTO shop_customer_mail(id,kind,recipient,payload,created_at) SELECT ?,?,?,?,? WHERE '+condition).bind(...args);
 }
 export async function queueMessage(env,m){
@@ -45,10 +45,10 @@ export async function queueMessage(env,m){
  if(['wish','contact'].includes(m.kind))statements.push(await customerMailStatement(env,{id:'inquiry:'+m.id,kind:'inquiry',to:m.email,payload:{reference:m.id,name:m.name,inquiryKind:m.kind},created_at:m.created_at||Date.now()}));
  await env.DB.batch(statements);
 }
-export async function flushCustomerMail(env,deadline=Date.now()+25000){
+export async function flushCustomerMail(env,deadline=Date.now()+25000,onlyId=null){
  if(!await mailConfig(env))return;
  await env.DB.prepare("DELETE FROM shop_customer_mail WHERE created_at<?").bind(Date.now()-90*86400000).run();
- const rows=(await env.DB.prepare("SELECT * FROM shop_customer_mail WHERE state IN ('pending','sending') AND next_at<=? ORDER BY created_at LIMIT 10").bind(Date.now()).all()).results;
+ const rows=(await env.DB.prepare("SELECT * FROM shop_customer_mail WHERE state IN ('pending','sending') AND next_at<=?"+(onlyId?" AND id=?":"")+" ORDER BY created_at LIMIT 10").bind(...(onlyId?[Date.now(),onlyId]:[Date.now()])).all()).results;
  for(const row of rows){
   if(Date.now()+10000>deadline)break;
   const now=Date.now(),claim=await env.DB.prepare("UPDATE shop_customer_mail SET state='sending',next_at=?,attempts=attempts+1 WHERE id=? AND state IN ('pending','sending') AND next_at<=?").bind(now+120000,row.id,now).run();if(!claim.meta?.changes&&!claim.changes)continue;
@@ -59,7 +59,7 @@ export async function flushCustomerMail(env,deadline=Date.now()+25000){
     if(order?.status!=='paid'||order?.mode!=='live'){await env.DB.prepare("UPDATE shop_customer_mail SET state='skipped',last_error='' WHERE id=?").bind(row.id).run();continue;}
    }
    await sendMail(env,{id:row.id,kind:'customer_'+row.kind,to:row.recipient,...customerMessage(row.kind,payload)});
-   await env.DB.prepare("UPDATE shop_customer_mail SET state='sent',sent_at=?,last_error='' WHERE id=?").bind(Date.now(),row.id).run();
+   await env.DB.batch([env.DB.prepare("UPDATE shop_customer_mail SET state='sent',sent_at=?,last_error='' WHERE id=?").bind(Date.now(),row.id),...(row.kind==='payment'?[env.DB.prepare("UPDATE shop_order_legal SET confirmation_sent_at=coalesce(confirmation_sent_at,?) WHERE order_id=?").bind(Date.now(),payload.reference)]:[])]);
   }catch{await env.DB.prepare("UPDATE shop_customer_mail SET state=?,last_error='Versand fehlgeschlagen. Zugang und SMTP-Freigabe prüfen.',next_at=? WHERE id=?").bind(row.attempts+1>=6?'failed':'pending',Date.now()+Math.min(3600000,60000*2**row.attempts),row.id).run();}
  }
 }

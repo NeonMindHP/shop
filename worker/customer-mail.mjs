@@ -5,7 +5,9 @@ const euro=cents=>new Intl.NumberFormat('de-DE',{style:'currency',currency:'EUR'
 export function customerMessage(kind,p){
  const reference=single(p.reference,80),short=reference.slice(0,8);
  let title,subject,paragraphs,link,label;
- if(kind==='inquiry'){
+ if(kind==='inquiry'&&p.inquiryKind==='withdrawal'){
+  title='Deine Widerrufserklärung ist eingegangen.';subject='Widerruf · Eingangsbestätigung · '+short;paragraphs=[p.receipt];link=origin+'/widerrufsbelehrung';label='Widerrufsbelehrung';
+ }else if(kind==='inquiry'){
   title='Deine Anfrage ist angekommen.';subject='Eingangsbestätigung · '+short;
   paragraphs=[p.name?'Hallo '+single(p.name,100)+',':'Hallo,','vielen Dank für deine Nachricht an NeonMind. Wir haben deine '+(p.inquiryKind==='wish'?'Wunschanfrage':'Kontaktanfrage')+' erhalten und melden uns nach der Prüfung bei dir.','Deine Referenznummer: '+reference,'Diese Eingangsbestätigung ist keine Bestellung und keine Zusage zu Preis oder Liefertermin. Bewahre die Referenz für Rückfragen auf.'];
   link=origin;label='Zum NeonMind Shop';
@@ -15,8 +17,10 @@ export function customerMessage(kind,p){
   if(paid){
    const downloads=p.items.some(i=>!i.service),services=p.items.some(i=>i.service);
    if(downloads)paragraphs.push('Deine gekauften Downloadpakete sind im geschützten Bestellbereich verfügbar.');
-   if(services)paragraphs.push('Enthaltene persönliche Designleistungen werden nach der vereinbarten Bearbeitung geliefert. Dafür steht noch kein sofort fertiges Downloadpaket bereit.');
+   if(services)paragraphs.push('Enthaltene persönliche Designleistungen werden nach der vereinbarten Bearbeitung geliefert. Dafür steht noch kein sofort fertiges Downloadpaket bereit. '+(p.legal?.serviceEarlyStart?'Sie haben den vorzeitigen Beginn ausdrücklich verlangt.':'Ohne ausdrückliches Verlangen beginnen wir die persönliche Leistung erst nach Ablauf der Widerrufsfrist.'));
   }else paragraphs.push('Zahlungsstatus bei der Bestellaufnahme: noch nicht bestätigt. Nach erfolgreicher Zahlungsprüfung erhältst du eine weitere Nachricht.');
+  if(p.tax)paragraphs.push('Im Endpreis enthaltene Steuern: '+euro(p.tax.amount)+(p.tax.country?' · Käuferland: '+single(p.tax.country,2):'')+'.');
+  if(p.legal){const l=p.legal;paragraphs.push('Vertragsinformationen · Version '+l.version+'\n'+l.provider,'Bestellte Leistungen und Nutzungsrechte:\n'+l.items.map(i=>[i.name,euro(i.price),i.description,i.contents,i.formats,i.license].filter(Boolean).join('\n')).join('\n\n'),'Ihre Erklärungen vom '+new Date(l.acceptedAt).toISOString()+'\n'+(l.digitalConsent||'Keine Zustimmung zur vorzeitigen Bereitstellung digitaler Inhalte.')+'\n'+(l.serviceConsent||'Keine vorzeitige persönliche Dienstleistung verlangt.'),l.terms,l.withdrawal);}
   if(p.purchaseMode==='guest')paragraphs.push('Bei einem Gastkauf öffnest du deine Bestellung mit der Bestellnummer und dem vertraulichen Bestellschlüssel aus dem Kaufabschluss. Der Schlüssel wird in dieser E-Mail nicht mitgeschickt.');
   link=origin+(p.purchaseMode==='guest'?'/guest':'/downloads');label=p.purchaseMode==='guest'?'Gastbestellung öffnen':'Meine Käufe & Downloads';
  }else throw new Error('Unbekannte Kundenmail');
