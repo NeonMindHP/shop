@@ -5,7 +5,9 @@ const euro=cents=>new Intl.NumberFormat('de-DE',{style:'currency',currency:'EUR'
 export function customerMessage(kind,p){
  const reference=single(p.reference,80),short=reference.slice(0,8);
  let title,subject,paragraphs,link,label;
- if(kind==='inquiry'&&p.inquiryKind==='withdrawal'){
+ if(kind==='inquiry'&&p.inquiryKind==='password_reset'){
+  title='Dein neues Passwort.';subject='Passwort zurücksetzen';paragraphs=['Für dein NeonMind-Shop-Konto wurde ein Link zum Zurücksetzen des Passworts angefordert.','Der Link gilt 30 Minuten und kann einmal verwendet werden. Nach einer erfolgreichen Änderung werden bestehende Anmeldungen beendet.','Falls du das nicht angefordert hast, kannst du diese Nachricht ignorieren. Dein Passwort bleibt dann unverändert.'];link=origin+'/passwort-zuruecksetzen#token='+p.token;label='Neues Passwort festlegen';
+ }else if(kind==='inquiry'&&p.inquiryKind==='withdrawal'){
   title='Deine Widerrufserklärung ist eingegangen.';subject='Widerruf · Eingangsbestätigung · '+short;paragraphs=[p.receipt];link=origin+'/widerrufsbelehrung';label='Widerrufsbelehrung';
  }else if(kind==='inquiry'){
   title='Deine Anfrage ist angekommen.';subject='Eingangsbestätigung · '+short;

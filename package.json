@@ -6,7 +6,7 @@
   "scripts": {
     "start": "node server/index.mjs",
     "test": "node --test tests/*.test.mjs",
-    "check": "node --check dist/shop.js && node --check server/index.mjs && node --check worker/index.mjs && node --check worker/auth.mjs && node --check worker/admin.mjs && node --check dist/slider.js && node --check worker/core.mjs && node --check worker/mail.mjs && node --check worker/customer-mail.mjs && node --check worker/payments.mjs && node --check dist/core.js && node --check dist/commerce-legal.js && node --check dist/withdrawal.js && node --check worker/withdrawals.mjs",
+    "check": "node --check dist/shop.js && node --check server/index.mjs && node --check worker/index.mjs && node --check worker/auth.mjs && node --check worker/admin.mjs && node --check dist/slider.js && node --check worker/core.mjs && node --check worker/mail.mjs && node --check worker/customer-mail.mjs && node --check worker/payments.mjs && node --check dist/core.js && node --check dist/commerce-legal.js && node --check dist/withdrawal.js && node --check worker/withdrawals.mjs && node --check worker/inquiries.mjs && node --check worker/inquiry-files.mjs && node --check worker/human-check.mjs && node --check worker/password-reset.mjs && node --check worker/request-body.mjs && node --check dist/form-tools.js && node --check dist/anpassung.js",
     "deploy": "wrangler deploy",
     "preview": "wrangler dev",
     "deploy:check": "wrangler deploy --dry-run"

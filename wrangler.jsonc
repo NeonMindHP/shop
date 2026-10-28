@@ -37,5 +37,15 @@
     "crons": [
       "*/15 * * * *"
     ]
-  }
+  },
+  "vars": {
+    "TURNSTILE_SITE_KEY": "0x4AAAAAAEco8Ssrfo8sJGuT"
+  },
+  "secrets_store_secrets": [
+    {
+      "binding": "TURNSTILE_SECRET",
+      "store_id": "5637a33e476047b29ddd39851d77ef5c",
+      "secret_name": "TURNSTILE_SECRET"
+    }
+  ]
 }

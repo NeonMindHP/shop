@@ -1,3 +1,5 @@
+import {purgeInquiryFiles} from './inquiry-files.mjs';
+import {digest} from './auth.mjs';
 import {customerMessage} from './customer-mail.mjs';
 const enc=new TextEncoder();
 const hosts={gmx:'mail.gmx.net',ionos:'smtp.ionos.de'};
@@ -37,14 +39,15 @@ export async function customerMailStatement(env,{id,kind,to,payload,created_at=D
  const encrypted=await seal(payload,env);
  let condition='1=1',args=[id,kind,to,encrypted,created_at];
  if(paidOrder){condition="EXISTS(SELECT 1 FROM customer_orders o JOIN shop_payments p ON p.order_id=o.id WHERE o.id=? AND o.status='paid' AND p.mode='live')";args.push(paidOrder);}
- else if(kind==='inquiry'&&payload.inquiryKind!=='withdrawal'){condition="(SELECT count(*) FROM shop_customer_mail WHERE recipient=? AND kind='inquiry' AND created_at>?)<3";args.push(to,created_at-900000);}
+ else if(kind==='inquiry'&&!['withdrawal','password_reset'].includes(payload.inquiryKind)){condition="(SELECT count(*) FROM shop_customer_mail WHERE recipient=? AND kind='inquiry' AND id LIKE 'inquiry:%' AND created_at>?)<3";args.push(to,created_at-900000);}
  return env.DB.prepare('INSERT OR IGNORE INTO shop_customer_mail(id,kind,recipient,payload,created_at) SELECT ?,?,?,?,? WHERE '+condition).bind(...args);
 }
-export async function queueMessage(env,m){
+export async function messageStatements(env,m){
  const statements=[env.DB.prepare('INSERT OR IGNORE INTO shop_messages(id,kind,name,email,subject,body,created_at) VALUES(?,?,?,?,?,?,?)').bind(m.id,m.kind,m.name||'',m.email||'',m.subject,m.body,m.created_at||Date.now()),env.DB.prepare('INSERT OR IGNORE INTO shop_notifications(message_id) VALUES(?)').bind(m.id)];
  if(['wish','contact'].includes(m.kind))statements.push(await customerMailStatement(env,{id:'inquiry:'+m.id,kind:'inquiry',to:m.email,payload:{reference:m.id,name:m.name,inquiryKind:m.kind},created_at:m.created_at||Date.now()}));
- await env.DB.batch(statements);
+ return statements;
 }
+export async function queueMessage(env,m){await env.DB.batch(await messageStatements(env,m));}
 export async function flushCustomerMail(env,deadline=Date.now()+25000,onlyId=null){
  if(!await mailConfig(env))return;
  await env.DB.prepare("DELETE FROM shop_customer_mail WHERE created_at<?").bind(Date.now()-90*86400000).run();
@@ -54,6 +57,7 @@ export async function flushCustomerMail(env,deadline=Date.now()+25000,onlyId=nul
   const now=Date.now(),claim=await env.DB.prepare("UPDATE shop_customer_mail SET state='sending',next_at=?,attempts=attempts+1 WHERE id=? AND state IN ('pending','sending') AND next_at<=?").bind(now+120000,row.id,now).run();if(!claim.meta?.changes&&!claim.changes)continue;
   try{
    const payload=await unseal(row.payload,env);
+   if(payload.inquiryKind==='password_reset'){const reset=await env.DB.prepare('SELECT token_hash FROM shop_password_resets WHERE token_hash=? AND used_at IS NULL AND expires_at>? AND NOT EXISTS(SELECT 1 FROM shop_user_state WHERE customer_id=shop_password_resets.customer_id AND blocked=1)').bind(await digest(payload.token),Date.now()).first();if(!reset){await env.DB.prepare("UPDATE shop_customer_mail SET state='skipped',last_error='' WHERE id=?").bind(row.id).run();continue;}}
    if(row.kind==='payment'){
     const order=await env.DB.prepare("SELECT o.status,p.mode FROM customer_orders o JOIN shop_payments p ON p.order_id=o.id WHERE o.id=?").bind(payload.reference).first();
     if(order?.status!=='paid'||order?.mode!=='live'){await env.DB.prepare("UPDATE shop_customer_mail SET state='skipped',last_error='' WHERE id=?").bind(row.id).run();continue;}
@@ -65,7 +69,9 @@ export async function flushCustomerMail(env,deadline=Date.now()+25000,onlyId=nul
 }
 export async function flushNotifications(env){
  const deadline=Date.now()+25000;
- await env.DB.batch([env.DB.prepare("DELETE FROM shop_notifications WHERE message_id IN (SELECT id FROM shop_messages WHERE kind IN ('wish','contact') AND created_at<?)").bind(Date.now()-90*86400000),env.DB.prepare("DELETE FROM shop_messages WHERE kind IN ('wish','contact') AND created_at<?").bind(Date.now()-90*86400000),env.DB.prepare('DELETE FROM customization_inquiries WHERE created_at<?').bind(Date.now()-90*86400000)]);
+ await purgeInquiryFiles(env);
+ await env.DB.prepare('DELETE FROM shop_password_resets WHERE expires_at<?').bind(Date.now()).run();
+ await env.DB.batch([env.DB.prepare("DELETE FROM shop_notifications WHERE message_id IN (SELECT id FROM shop_messages WHERE kind IN ('wish','contact') AND created_at<? AND NOT EXISTS(SELECT 1 FROM shop_inquiry_files f WHERE f.message_id=shop_messages.id))").bind(Date.now()-90*86400000),env.DB.prepare("DELETE FROM shop_messages WHERE kind IN ('wish','contact') AND created_at<? AND NOT EXISTS(SELECT 1 FROM shop_inquiry_files f WHERE f.message_id=shop_messages.id)").bind(Date.now()-90*86400000),env.DB.prepare('DELETE FROM customization_inquiries WHERE created_at<?').bind(Date.now()-90*86400000)]);
  if(!await mailConfig(env))return;
  const rows=(await env.DB.prepare("SELECT n.message_id,m.kind FROM shop_notifications n JOIN shop_messages m ON m.id=n.message_id WHERE n.state='pending' AND n.next_at<=? ORDER BY m.created_at LIMIT 10").bind(Date.now()).all()).results;
  for(const r of rows){
