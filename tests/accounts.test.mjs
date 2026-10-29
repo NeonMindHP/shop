@@ -121,3 +121,17 @@ test('complete motif galleries use public reduced images while private packages 
  assert.equal((await f.request('/api/admin/package/ocean-veil')).status,403);
  assert.equal((await f.request('/api/download',{orderId:'missing',productId:'ocean-veil'})).status,403);
 }finally{f.close()}});
+
+
+test('showcase mode exposes only public viewing and cannot grant administrative or download access',async()=>{const f=fixture();try{
+ const reg=await f.request('/api/register',{email:'showcase-owner@example.com',password:'showcase-test-password'});f.sqlite.prepare('INSERT INTO shop_admins VALUES(?)').run(reg.data.user.id);await f.request('/api/admin/maintenance',{enabled:true,info:'Wartung',status:'Shop | in Arbeit'});
+ const start=await worker.fetch(new Request('https://shop.test/api/showcase/start',{method:'POST',headers:{Origin:'https://shop.test'}}),f.env);assert.equal(start.status,200);assert.match(start.headers.get('Set-Cookie'),/nm_showcase=1; HttpOnly; Secure; SameSite=Lax; Path=\/; Max-Age=3600/);
+ const bad=await worker.fetch(new Request('https://shop.test/api/showcase/start',{method:'POST',headers:{Origin:'https://evil.test'}}),f.env);assert.equal(bad.status,403);
+ const cookie='nm_showcase=1';for(const path of ['/','/collections','/product/aurora','/demos/overdrive/index.html'])assert.equal((await worker.fetch(new Request('https://shop.test'+path,{headers:{Cookie:cookie}}),f.env)).status,200);
+ for(const path of ['/account','/downloads','/checkout'])assert.equal((await worker.fetch(new Request('https://shop.test'+path,{headers:{Cookie:cookie}}),f.env)).status,503);
+ assert.equal((await f.request('/api/products',undefined,cookie)).status,200);assert.equal((await f.request('/api/products',undefined,'')).status,503);
+ assert.equal((await f.request('/api/admin/state',undefined,cookie)).status,403);assert.equal((await f.request('/api/orders',undefined,cookie)).status,401);assert.equal((await f.request('/api/download',{orderId:'missing',productId:'aurora'},cookie)).status,403);
+ const hidden={id:'hidden-art',name:'Hidden',price:100,category:'Wallpaper',image:'assets/flow.png'};f.sqlite.prepare('INSERT INTO shop_products VALUES(?,?,?,?,?)').run(hidden.id,JSON.stringify(hidden),0,1,1);
+ assert.equal((await f.request('/api/gallery/hidden-art',undefined,cookie)).status,404);assert.equal((await f.request('/api/gallery-image/hidden-art/1',undefined,cookie)).status,404);
+ const end=await worker.fetch(new Request('https://shop.test/api/showcase/end',{method:'POST',headers:{Origin:'https://shop.test'}}),f.env);assert.match(end.headers.get('Set-Cookie'),/Max-Age=0/);
+}finally{f.close()}});

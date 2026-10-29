@@ -1,0 +1,2 @@
+const logo=document.querySelector('header .brand');
+if(logo){let clicks=0,last=0,busy=false;logo.addEventListener('click',async event=>{event.preventDefault();if(busy)return;const now=Date.now();if(now-last>15000)clicks=0;last=now;if(++clicks<10)return;busy=true;try{const r=await fetch('/api/showcase/start',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});if(!r.ok)throw Error();location.assign('/')}catch{clicks=0;busy=false;logo.title='Vorführansicht konnte nicht geöffnet werden. Bitte erneut versuchen.'}})}
