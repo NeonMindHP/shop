@@ -95,3 +95,19 @@ test('SMTP sends credentials only after TLS and the notice contains no customer 
  function socket(tls){let stream;const encoder=new TextEncoder();const readable=new ReadableStream({start(c){stream=c;if(!tls)c.enqueue(encoder.encode('220 SMTP ready\r\n'));}});const writable=new WritableStream({write(bytes){const line=new TextDecoder().decode(bytes);commands.push(line);let response='250 OK\r\n';if(line.startsWith('EHLO'))response=tls?'250-AUTH LOGIN\r\n250 OK\r\n':'250-STARTTLS\r\n250 OK\r\n';if(line.startsWith('STARTTLS'))response='220 Begin TLS\r\n';if(line.startsWith('AUTH LOGIN')){assert.equal(secure,true);response='334 Username\r\n';}if(line.trim()===btoa('owner@gmx.de'))response='334 Password\r\n';if(line.startsWith('DATA'))response='354 Send data\r\n';if(line.startsWith('From:'))raw=line;if(line.startsWith('QUIT'))response='221 Bye\r\n';stream.enqueue(encoder.encode(response));}});return {readable,writable,startTls(){secure=true;return socket(true)},async close(){closed=true}};}
  env.TEST_CONNECT=(address,options)=>{assert.equal(address.hostname,'mail.gmx.net');assert.equal(address.port,587);assert.equal(options.secureTransport,'starttls');return socket(false)};await sendNotice(env,'wish');assert.ok(closed);assert.ok(commands.some(x=>x.startsWith('AUTH LOGIN')));assert.ok(raw.includes('To: info@neonmind-ai.com'));const decoded=Buffer.from(raw.split('\r\n\r\n')[1].split('\r\n.')[0].replace(/\r\n/g,''),'base64').toString();assert.ok(decoded.includes('Neue Wunschanfrage'));assert.ok(decoded.includes('keine Kundendaten'));
 });
+
+
+test('product discovery metadata survives draft edits, validates limits and exposes package size without its private key',async()=>{const f=fixture();try{
+ const registered=await f.request('/api/register',{email:'discovery@example.com',password:'discovery-test-password'});f.sqlite.prepare('INSERT INTO shop_admins VALUES(?)').run(registered.data.user.id);
+ const p={id:'details-test',name:'Details',price:1000,category:'Wallpaper',description:'Test',contents:'12 Motive',formats:'PNG',image:'assets/flow.png',published:false,resolutions:'3840 × 2160',version:'1.1',releaseLabel:'Erweitert',changeNotes:'Zwei Motive ergänzt. Für bestehende Käufer enthalten.',relatedIds:'aurora, flow'};
+ assert.equal((await f.request('/api/admin/product',p)).status,200);
+ const base={...p};for(const k of ['resolutions','version','releaseLabel','changeNotes','relatedIds'])delete base[k];assert.equal((await f.request('/api/admin/product',base)).status,200);
+ const draft=(await f.request('/api/admin/state')).data.products.find(x=>x.id===p.id);assert.equal(draft.version,'1.1');assert.equal(draft.changeNotes,p.changeNotes);
+ assert.equal((await f.request('/api/admin/product',{...p,relatedIds:'aurora,<script>'})).status,400);
+ assert.equal((await f.request('/api/admin/product',{...p,relatedIds:'a,b,c,d'})).status,400);
+ assert.equal((await f.request('/api/admin/product',{...p,version:'x'.repeat(41)})).status,400);
+ assert.equal((await f.request('/api/admin/product',{...p,releaseLabel:'fake'})).status,400);
+ assert.equal((await f.request('/api/admin/product',{...p,published:true})).status,200);
+ f.sqlite.prepare('INSERT INTO product_files VALUES(?,?,?,?,?)').run(p.id,'private/test.zip','Test.zip',1048576,1);
+ const published=(await f.request('/api/products')).data.find(x=>x.id===p.id);assert.equal(published.packageBytes,1048576);assert.equal(published.packageReady,true);assert.ok(!JSON.stringify(published).includes('private/test.zip'));
+}finally{f.close()}});
