@@ -1,3 +1,4 @@
+import motifPreviews from '../dist/package-previews.json' with {type:'json'};
 import {inquiryApi} from './inquiries.mjs';
 import {passwordResetApi} from './password-reset.mjs';
 import {turnstileConfigured} from './human-check.mjs';
@@ -26,7 +27,7 @@ export default {async fetch(request,env,ctx){const url=new URL(request.url);cons
  if(url.pathname==='/api/storefront'&&request.method==='GET')return json(await storefront(db));
  if(maintenanceState.enabled&&/^\/api\/(products|storefront|gallery(?:-image)?)(?:\/|$)/.test(url.pathname)&&!await isAdmin(env,await session(request,db)))return json({error:'Der Shop ist im Wartungsmodus.'},503);
  if(url.pathname==='/api/products')return json(await catalog(db));
- if(url.pathname.startsWith('/api/gallery/')&&request.method==='GET'){const id=url.pathname.split('/').pop();const rows=(await db.prepare('SELECT position,title FROM product_gallery WHERE product_id=? ORDER BY position').bind(id).all()).results;return json(rows.map(r=>({title:r.title,image:'/api/gallery-image/'+id+'/'+r.position})));}
+ if(url.pathname.startsWith('/api/gallery/')&&request.method==='GET'){const id=url.pathname.split('/').pop();const product=await db.prepare('SELECT data FROM shop_products WHERE id=?').bind(id).first();if(product&&JSON.parse(product.data).motifPreviewSet==='v1'&&motifPreviews[id])return json(motifPreviews[id]);const rows=(await db.prepare('SELECT position,title FROM product_gallery WHERE product_id=? ORDER BY position').bind(id).all()).results;return json(rows.map(r=>({title:r.title,image:'/api/gallery-image/'+id+'/'+r.position})));}
  if(url.pathname.startsWith('/api/gallery-image/')&&request.method==='GET'){const parts=url.pathname.split('/');const row=await db.prepare('SELECT object_key FROM product_gallery WHERE product_id=? AND position=?').bind(parts[3],Number(parts[4])).first();const object=row&&await env.PRODUCT_FILES?.get(row.object_key);if(!object)return new Response('Nicht gefunden',{status:404});return new Response(object.body,{headers:{'Content-Type':'image/jpeg','Cache-Control':'public, max-age=300','X-Content-Type-Options':'nosniff'}});}
  if(!db)return json({error:'DATABASE_NOT_CONFIGURED'},503);
  if(request.method==='POST'&&request.headers.get('Origin')!==url.origin)return json({error:'INVALID_ORIGIN'},403);

@@ -111,3 +111,13 @@ test('product discovery metadata survives draft edits, validates limits and expo
  f.sqlite.prepare('INSERT INTO product_files VALUES(?,?,?,?,?)').run(p.id,'private/test.zip','Test.zip',1048576,1);
  const published=(await f.request('/api/products')).data.find(x=>x.id===p.id);assert.equal(published.packageBytes,1048576);assert.equal(published.packageReady,true);assert.ok(!JSON.stringify(published).includes('private/test.zip'));
 }finally{f.close()}});
+
+
+test('complete motif galleries use public reduced images while private packages remain protected',async()=>{const f=fixture();try{
+ const product={id:'ocean-veil',name:'Ocean',price:1390,category:'Wallpaper',description:'Test',contents:'18 Motive',formats:'JPG',image:'assets/flow.png',motifPreviewSet:'v1'};
+ f.sqlite.prepare('INSERT INTO shop_products VALUES(?,?,?,?,?)').run(product.id,JSON.stringify(product),1,1,1);
+ const gallery=await f.request('/api/gallery/ocean-veil');assert.equal(gallery.status,200);assert.equal(gallery.data.length,18);assert.ok(gallery.data.every(p=>p.image.startsWith('/assets/package-previews/ocean-veil/')&&p.clean===true));
+ const listing=(await f.request('/api/products')).data.find(p=>p.id==='ocean-veil');assert.equal(listing.image,gallery.data[0].image);
+ assert.equal((await f.request('/api/admin/package/ocean-veil')).status,403);
+ assert.equal((await f.request('/api/download',{orderId:'missing',productId:'ocean-veil'})).status,403);
+}finally{f.close()}});

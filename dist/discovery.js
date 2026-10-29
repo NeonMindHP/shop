@@ -23,11 +23,11 @@ export function mountDiscovery({getProducts,renderCard,toast,onWishlistChange}){
  const related=relatedProducts(p,getProducts());if(related.length)layout.parentElement.insertAdjacentHTML('beforeend',`<section class="panel related-packages"><span class="kicker">${p.relatedIds?'VON NEONMIND AUSGEWÄHLT':'MEHR AUS DIESER KATEGORIE'}</span><h2>Passt zu deiner Auswahl</h2><div class="discovery-grid">${related.map(renderCard).join('')}</div></section>`);
  },gallery(id,pictures){
  const stage=document.querySelector('.device-stage');if(!stage||stage.dataset.product!==id)return;
- const motifs=pictures.filter(p=>typeof p.image==='string'&&new RegExp('^/api/gallery-image/'+id+'/[0-9]+$').test(p.image));if(!motifs.length)return;
- const media=stage.parentElement,img=stage.querySelector('img');stage.dataset.motif=motifs[0].image;
+ const motifs=pictures.filter(p=>typeof p.image==='string'&&(new RegExp('^/api/gallery-image/'+id+'/[0-9]+$').test(p.image)||new RegExp('^/assets/package-previews/'+id+'/[0-9]+\\.jpg$').test(p.image)));if(!motifs.length)return;
+ const media=stage.parentElement,img=stage.querySelector('img');stage.dataset.motif=motifs[0].image;stage.dataset.clean=String(motifs[0].clean===true);
  media.querySelectorAll('button[data-device]').forEach(b=>b.disabled=false);
  const picker=document.createElement('div');picker.className='device-motifs';picker.hidden=stage.dataset.device==='original';picker.setAttribute('role','group');picker.setAttribute('aria-label','Einzelmotiv für Geräteansicht wählen');
- motifs.forEach((p,i)=>{const b=document.createElement('button');b.type='button';b.className='device-motif';b.setAttribute('aria-label','Motiv '+(i+1)+' in Geräteansicht zeigen');b.setAttribute('aria-pressed',String(i===0));const thumb=document.createElement('img');thumb.src=p.image;thumb.alt='';thumb.loading='lazy';b.append(thumb);b.onclick=()=>{stage.dataset.motif=p.image;img.src=p.image;img.alt='Einzelmotiv '+(i+1)+' – Geräteansicht';picker.querySelectorAll('button').forEach(x=>x.setAttribute('aria-pressed',String(x===b)))};picker.append(b)});
+ motifs.forEach((p,i)=>{const b=document.createElement('button');b.type='button';b.className='device-motif';b.setAttribute('aria-label','Motiv '+(i+1)+' in Geräteansicht zeigen');b.setAttribute('aria-pressed',String(i===0));const thumb=document.createElement('img');thumb.src=p.image;thumb.alt='';thumb.loading='lazy';b.append(thumb);b.onclick=()=>{stage.dataset.motif=p.image;stage.dataset.clean=String(p.clean===true);img.src=p.image;img.alt='Einzelmotiv '+(i+1)+' – Geräteansicht';picker.querySelectorAll('button').forEach(x=>x.setAttribute('aria-pressed',String(x===b)))};picker.append(b)});
  stage.after(picker);if(stage.dataset.device!=='original')img.src=stage.dataset.motif;
  }};
 }
