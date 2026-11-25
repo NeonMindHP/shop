@@ -16,6 +16,7 @@ export function customerMessage(kind,p){
  }else if(kind==='order'||kind==='payment'){
   const paid=kind==='payment';title=paid?'Deine Zahlung ist bestätigt.':'Deine Bestellung ist eingegangen.';subject=(paid?'Zahlungsbestätigung':'Bestelleingang')+' · '+short;
   paragraphs=['Hallo,',paid?'vielen Dank! Die Zahlung für deine Bestellung wurde erfolgreich bestätigt.':'vielen Dank für deine Bestellung bei NeonMind. Diese Nachricht bestätigt den Eingang deiner Bestellung; sie ist noch keine Zahlungsbestätigung.','Bestellnummer: '+reference,'Deine Bestellung:\n'+p.items.map(i=>single(i.name,160)+' — '+euro(i.price)).join('\n'),'Gesamtbetrag: '+euro(p.amount)];
+  if(p.paymentSystem==='managed')paragraphs.push('Die Zahlung wurde über Stripe Managed Payments abgewickelt. Stripe handelt als Merchant of Record und stellt die Zahlungsbelege bereit. Diese NeonMind-Nachricht informiert über den Bestell- und Downloadstatus und ist keine Steuerrechnung.');
   if(paid){
    const downloads=p.items.some(i=>!i.service),services=p.items.some(i=>i.service);
    if(downloads)paragraphs.push('Deine gekauften Downloadpakete sind im geschützten Bestellbereich verfügbar.');
