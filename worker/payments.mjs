@@ -90,6 +90,17 @@ export async function checkoutApi(request,env,user){
   if(!['unreviewed','regular','small_business'].includes(b.mode))return json({error:'Ungültiger Steuermodus.'},400);
   await db.prepare("INSERT INTO shop_settings VALUES('taxProfile',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(JSON.stringify({mode:b.mode,legalReviewRequired:true,updatedAt:Date.now(),operator:user.id})).run();return json({ok:true});
  }
+ if(url.pathname==='/api/admin/payment-test-refund'){
+  if(!admin)return json({error:'Nur für Betreiber.'},403);
+  if(request.method!=='POST')return json({error:'Methode nicht erlaubt.'},405);
+  const raw=await request.text();if(raw.length>1024)return json({error:'Anfrage zu groß.'},413);const b=JSON.parse(raw);
+  const payment=typeof b.orderId==='string'&&await db.prepare('SELECT p.*,o.amount,o.status FROM shop_payments p JOIN customer_orders o ON o.id=p.order_id WHERE p.order_id=?').bind(b.orderId).first();
+  if(payment?.mode!=='test'||payment.status!=='test_paid'||!payment.payment_intent)return json({error:'Nur bestätigte Stripe-Sandbox-Zahlungen können hier testweise erstattet werden.'},409);
+  try{const refund=await stripeRequest(env,'test','refunds',new URLSearchParams({payment_intent:payment.payment_intent,amount:String(payment.amount),'metadata[neonmind_order_id]':payment.order_id}),'nm-test-refund-'+payment.order_id);
+   if(refund.payment_intent!==payment.payment_intent||refund.amount!==payment.amount||refund.currency!=='eur'||!['succeeded','pending'].includes(refund.status))throw Error('REFUND_NOT_CONFIRMED');
+   return json({ok:true,message:'Sandbox-Erstattung angefordert. Der signierte Stripe-Webhook bestätigt die Sperre des Downloads.'});
+  }catch{return json({error:'Sandbox-Erstattung nicht bestätigt. Keine Livezahlung wurde angefragt.'},409);}
+ }
  if(url.pathname==='/api/admin/payment-reconcile'){
   if(!admin)return json({error:'Nur für Betreiber.'},403);
   if(request.method!=='POST')return json({error:'Methode nicht erlaubt.'},405);

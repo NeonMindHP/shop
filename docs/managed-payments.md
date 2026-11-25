@@ -1,6 +1,6 @@
 # Stripe Managed Payments – Entwicklungsstand 25.11.2026
 
-Die Erweiterung ist für Entwicklung und Sandbox vorbereitet. Sie ist noch nicht online ausgerollt und nicht für den Liveverkauf abgenommen. Die vorhandene Produktionskonfiguration wurde nicht verändert.
+Die Erweiterung ist für Entwicklung und Sandbox bereitgestellt und mit tatsächlichen Stripe-Sandbox-Zahlungen geprüft. Sie ist nicht für den Liveverkauf abgenommen. Wartungsmodus und deaktivierte echte Zahlungen bleiben erhalten. Die produktive Shop-Datenbank erhielt ausschließlich die additive Schema-Migration sowie klar getrennte technische Testdaten.
 
 ## Produktverwaltung
 
@@ -48,12 +48,13 @@ Alle folgenden Endpunkte erfordern eine authentifizierte Betreiber-Sitzung. Schr
 | `POST /api/admin/tax-profile` | JSON `{mode:"unreviewed"|"regular"|"small_business"}` |
 | `GET /api/admin/payment-accounting` | Bis zu 1000 aktuelle Datensätze, Beträge in kleinsten Währungseinheiten |
 | `POST /api/admin/payment-reconcile` | Lesender Stripe-Abgleich für JSON `{orderId}` |
+| `POST /api/admin/payment-test-refund` | Erstattet ausschließlich bestätigte Sandbox-Zahlungen; Live-/Admin-/unbezahlte Bestellungen werden vor Stripe abgelehnt |
 
 ## Prüfung
 
-`npm test`: 80 Tests bestanden, darunter 11 neue Tests mit isolierter SQLite-Datenbank und kontrollierten Stripe-Antworten. Abgedeckt sind API-Parameter, Modustrennung, DE/FR/US-Käuferlanddaten, Gast-/Kontobestellung, fehlgeschlagene Zahlung, Betrags-/Steuerfehler, Rückerstattung, Anfechtung, Downloadentzug, Preiswechsel, Duplikatvermeidung, bestehende Produktzuordnung, Berechtigungen, automatische Synchronisierung sowie Gebühren in abweichender Abrechnungswährung.
+`npm test`: 81 Tests bestanden, darunter 12 neue Tests mit isolierter SQLite-Datenbank und kontrollierten Stripe-Antworten. Abgedeckt sind API-Parameter, Modustrennung, DE/FR/US-Käuferlanddaten, Gast-/Kontobestellung, fehlgeschlagene Zahlung, Betrags-/Steuerfehler, Rückerstattung, Anfechtung, Downloadentzug, Preiswechsel, Duplikatvermeidung, bestehende Produktzuordnung, Berechtigungen, automatische Synchronisierung sowie Gebühren in abweichender Abrechnungswährung.
 
-Diese Tests führen keine Stripe-Transaktionen aus. Die Länderprüfungen prüfen die Verarbeitung gelieferter Daten und beweisen keine tatsächliche Steuerberechnung durch Stripe.
+Diese automatisierten Tests führen keine Stripe-Transaktionen aus. Die zusätzlichen tatsächlichen Sandbox-Prüfungen sind nachfolgend getrennt dokumentiert.
 
 `npm run check` und `npm run deploy:check` bestanden. In einer ausschließlich lokalen Browser-Testumgebung wurden neue Felder, Berechtigungssperre, Speicherung der Managed-Auswahl, sichtbare Synchronisierungsfehler und Speicherung des vorbereiteten Steuermodus geprüft. Die Testumgebung verwendet eine flüchtige Datenbank und keine echten Schlüssel.
 
@@ -61,9 +62,11 @@ Diese Tests führen keine Stripe-Transaktionen aus. Die Länderprüfungen prüfe
 
 Der bestehende Worker heißt `neonmind-art`; D1 heißt `neonmind-shop`, R2 heißt `neonmind-shop-private`. Die bestehende Cloudflare-Secrets-Liste enthält Live- und Testschlüssel sowie beide Webhook-Secrets. Deren Werte wurden nicht gelesen oder ausgegeben. Der öffentliche Health-Endpunkt meldete am 25.11.2026 `paymentsEnabled=false`, `enabled=false`, `liveConfigured=true`, `sandboxConfigured=true`.
 
-Ein lesender Aufruf von `wrangler d1 migrations list neonmind-shop --remote` scheiterte mit Cloudflare-Fehler `7403`: Konto für den Dienst nicht gültig oder nicht autorisiert. `wrangler whoami` meldet unter anderem fehlendes `d1:write`. Daher wurde keine Migration gegen die Produktionsdatenbank ausgeführt und kein Worker veröffentlicht.
+Der zunächst fehlende D1-Zugriff wurde durch eine vom Betreiber bestätigte Cloudflare-Geräteanmeldung erneuert. Für die bestehende Secrets-Store-Anbindung von Turnstile bestätigte der Betreiber anschließend auch `secrets_store:write`. Schlüsselwerte wurden nicht gelesen. Migration `0014_managed_payments.sql` wurde nach Datensicherung und erfolgreichem lokalen Wiederherstellungstest angewendet. Alle ursprünglichen 136 Produkte, 8 Bestellungen und 132 Dateizuordnungen blieben dabei erhalten.
 
-Nach Erneuerung der autorisierten Cloudflare-Anmeldung:
+Aktive Worker-Version: `a2539c67-3811-453e-968a-1416d497b151`. Die vorherige Update-Version war `176d74ad-c2cb-4c10-9e70-d1ce3988b60d`; ursprüngliche Rückfallversion vor dieser Arbeit: `b3c61a37-be3b-4ac7-8405-ab7c30957870`. Routen und Cron-Zeitplan wurden nicht geändert.
+
+Ausroll- und weitere Abnahmeschritte (Schritte 1–3 bereits ausgeführt, Schritt 7 nachstehend belegt):
 
 1. Wartungsmodus und deaktivierte echte Zahlungen im Betreiberbereich bestätigen; Datenbanksicherung erstellen und Migrationsstand lesen.
 2. Additive Migration `0014_managed_payments.sql` zuerst in einer isolierten Test-D1-Datenbank prüfen, dann vor der passenden Worker-Version anwenden. Bestehende Bestellungen erhalten `payment_system=standard`.
@@ -75,6 +78,22 @@ Nach Erneuerung der autorisierten Cloudflare-Anmeldung:
 8. Rechtstexte, Verkäuferrolle, Verbraucherhinweise, Rechnungen, eigene Steuerbehandlung, Buchhaltungsablauf und Produktberechtigungen fachlich abnehmen lassen.
 
 `MANAGED_PAYMENTS_LIVE_APPROVED` wird nicht gesetzt. Wartungsmodus und echte Zahlungen werden nicht freigeschaltet. Ein späterer Live-Release braucht eine ausdrückliche Betreiberfreigabe und die noch fehlende fachliche/technische Abnahme. Ein Rückrollen des Workers lässt die additiven Tabellen bestehen; keine bestehenden Daten löschen.
+
+## Tatsächliche Sandbox-Prüfung am 25.11.2026
+
+Der Betreiber meldete sich selbst im Shop an. Für die Tests wurde ausschließlich `managed-payments-qa-20261125` neu angelegt, mit eigener technischer PNG-Grafik und einem klar gekennzeichneten Test-ZIP. Keine bestehenden Verkaufsprodukte wurden dafür umklassifiziert. Der Artikel und seine Stripe-Sandbox-Zuordnung sind nach Abschluss deaktiviert beziehungsweise archiviert. Die Testbestellungen bleiben als nachvollziehbare Testhistorie bestehen.
+
+- Automatische Produktsynchronisierung: erfolgreich. Ein Stripe-Produkt `nm_test_managed_payments_qa_20261125` und Preis `price_1UflmyRrNNaIfsH01wpVXK9K` wurden tatsächlich angelegt. Wiederholte Speicherung sowie Aktivierung und Deaktivierung verwendeten dieselben Produkt-/Preiszuordnungen.
+- Deutschland: Bestellung `653b23c7-44d8-4e5d-b094-b213b5e923a6`, 1390 EUR-Cent, 222 EUR-Cent Steuer, `payment_system=managed`. Tatsächlicher signierter Zahlungswebhook setzte `test_paid`. Geschützter Paketdownload erfolgreich; Datei stimmt bytegenau mit dem Upload überein, SHA-256 `13ab286c0521923ee95452761f5ffbb60534c17ffc8800c29763f28831f7fbc8`.
+- Lesender Stripe-Abgleich dieser Zahlung: Abrechnungsbrutto 1390, Balance-Transaction-Fee 291, Zahlungssaldo 1099, jeweils EUR-Cent. Dies sind Stripes Testwerte, keine Aussage über spätere Livepreise oder Bankauszahlungen. Die Fee kann unterschiedliche Stripe-Abzüge enthalten und wird nicht pauschal als reine Zahlungsabwicklungsgebühr interpretiert.
+- Sandbox-Erstattung dieser Zahlung: über den strikt auf `mode=test` beschränkten Betreiber-Testknopf angefordert. Der tatsächliche signierte `charge.refunded`-Webhook setzte `refunded`. Die Downloadansicht zeigt „Erstattet · Zugang gesperrt“ und keinen Paketdownload für diese Bestellung.
+- Frankreich/Kundenkonto: Bestellung `01675905-e974-465a-bad5-60b51f4eb28d`. Zuerst wurde die dokumentierte Ablehnungs-Testkarte verwendet; Stripe meldete die Ablehnung. Die Bestellung blieb `pending`, ohne Downloadfreigabe. Danach erfolgreicher Wiederholungsversuch derselben Sitzung mit Frankreich als Käuferland: 1390 EUR-Cent, 232 EUR-Cent Steuer, `test_paid`.
+- USA/Anfechtung: Bestellung `ca70fba1-19f4-4283-98d5-49326a0827c4`, ausschließlich synthetische Testadresse in California. Die dokumentierte Stripe-Karte für synchrone Testanfechtungen führte zu 1390 EUR-Cent und 0 EUR-Cent Steuer für diese konkrete Testkonstellation. Der tatsächliche Dispute-Webhook setzte `disputed`; kein Downloadknopf für diese Bestellung.
+- Die Sandbox-Kaufart „Gast“ wurde ebenfalls durchlaufen; Sandbox-Bestellungen werden zum Schutz grundsätzlich dem angemeldeten Betreiber zugeordnet. Ein echter anonymer Managed-Gastkauf bleibt wegen der Live-Sperre nur automatisiert geprüft und benötigt vor Verkaufsstart eine gesonderte Abnahme.
+- Für Sandbox-Bestellungen wurden keine NeonMind-Kundenmails erzeugt. Die Live-Mailkette ist automatisiert mit kontrollierten Stripe-Antworten geprüft, aber nicht durch echte Liveverkäufe oder reale Live-Kundenmails abgenommen.
+- Abschlusszustand: 137 Produktdatensätze (136 unveränderte ursprüngliche plus 1 deaktivierter QA-Artikel), 133 Dateizuordnungen und 11 Bestellungen (8 ursprüngliche plus 3 Sandbox-Bestellungen). Wartungsmodus bleibt aktiv, `paymentsEnabled=false`, eigener Steuermodus weiterhin `unreviewed`.
+
+Für die Sandbox-Tests wurden die offiziellen Stripe-Testkarten aus [Testing](https://docs.stripe.com/testing) verwendet. Es wurden keine echten Karten oder Livezahlungen verwendet.
 
 ## Geänderte Quellen
 
